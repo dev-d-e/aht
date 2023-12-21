@@ -10,9 +10,13 @@ It's another hypertext format to describe GUI for native application.
         <title></title>
     </head>
     <body column="[100,100]" row="[100,100],2">
-        <a href=""></a>
+        <a href="" async=""></a>
         <area class="" id="" width="1000" height="100" column="2" row=""></area>
     </body>
+    <css>
+    </css>
+    <script>
+    </script>
  </aht>
 ```
  
