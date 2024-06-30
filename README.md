@@ -5,12 +5,20 @@ It's another hypertext format to describe GUI for native application.
 ## Usage
 
 ```
+use aht::markup::{Page, TypeEntity};
+
+TypeEntity::from_str(&s);
+Page::from_str(&s);
+```
+
+```
 <aht>
     <head>
         <title></title>
     </head>
     <body column="[100,100]" row="[100,100],2">
-        <a href="" async=""></a>
+        <inp name="" value="" readonly required>input</inp>
+        <button href="" async="">button</button>
         <area class="" id="" width="1000" height="100" column="2" row=""></area>
     </body>
     <css>
@@ -24,7 +32,7 @@ It's another hypertext format to describe GUI for native application.
 
 * "body" element is grid layout. There is only one "body" element in conforming documents.
 
-set "column" attribute and "row" attribute with segments or number, child elements can be located in body, these position are calculated by segments array or column number.
+set "column" attribute and "row" attribute with number or points or segments, child elements can be located in body.
 
 * "area" element is grid layout. it has "class","id","width","height","column","row"... attributes.
 
@@ -36,6 +44,12 @@ set "column" attribute and "row" attribute with segments or number, child elemen
 
 "height" attribute is vertical dimension.
 
-set "column" attribute and "row" attribute with segments or number, child elements can be located in body, these position are calculated by segments array or column number.
+set "column" attribute and "row" attribute with number or points or segments, child elements can be located in body.
 
-* "a" element has an "href" attribute,it represents a hyperlink.
+* "pt" element represents a plain text.
+
+* "inp" element represents input.
+
+* "button" element represents a button.
+
+* "video" element represents video.
