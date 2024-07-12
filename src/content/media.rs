@@ -1,40 +1,45 @@
 use crate::markup::{Attribute, TypeEntity, AUDIO, IMG, VIDEO};
-use crate::parts::{HorizontalAlign, Shape, VerticalAlign};
-use skia_safe::{Canvas, Color, Font, IRect, Image, Paint, Rect};
-use std::collections::VecDeque;
+use crate::parts::{HorizontalAlign, Ordinal, RectangleRange, Shape, Subset, VerticalAlign};
+use skia_safe::{Canvas, Color, Image, Paint};
 
 ///"Audio" represents audio stream.
 #[derive(Debug)]
 pub struct Audio {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
     hidden: bool,
-    range: IRect,
+    id: String,
+    ordinal: Ordinal,
+    tip: String,
+    range: RectangleRange,
     background: Color,
 }
 
 impl Audio {
     pub fn new() -> Self {
         Audio {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
             hidden: false,
-            range: IRect::new_empty(),
+            id: String::new(),
+            ordinal: Ordinal::None,
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -45,11 +50,13 @@ impl Audio {
 
     text!();
 
-    id_class!();
-
-    tip!();
+    class_id!();
 
     hidden!();
+
+    ordinal!();
+
+    tip!();
 
     range_background!();
 
@@ -59,38 +66,40 @@ impl Audio {
 ///"Img" represents an image.
 #[derive(Debug)]
 pub struct Img {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
     hidden: bool,
-    src: Option<Image>,
-    range: IRect,
+    id: String,
+    ordinal: Ordinal,
+    src: String,
+    tip: String,
+    range: RectangleRange,
     background: Color,
     horizontal_align: HorizontalAlign,
     vertical_align: VerticalAlign,
     shape: Shape,
     shape_background: Color,
-    border_width: i32,
+    border_width: isize,
     border_color: Color,
 }
 
 impl Img {
     pub fn new() -> Self {
         Img {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
             hidden: false,
-            src: None,
-            range: IRect::new_empty(),
+            id: String::new(),
+            ordinal: Ordinal::None,
+            src: String::new(),
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::GRAY,
             horizontal_align: HorizontalAlign::Left,
             vertical_align: VerticalAlign::Middle,
-            shape: Shape::Circle(0, 0, 0),
+            shape: Shape::Default,
             shape_background: Color::WHITE,
             border_width: 0,
             border_color: Color::BLACK,
@@ -99,9 +108,14 @@ impl Img {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
+            Attribute::SRC(a) => self.set_src(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -112,11 +126,15 @@ impl Img {
 
     text!();
 
-    id_class!();
-
-    tip!();
+    class_id!();
 
     hidden!();
+
+    ordinal!();
+
+    src!();
+
+    tip!();
 
     range_background!();
 
@@ -124,41 +142,47 @@ impl Img {
 
     shape_background_border!();
 
-    pub fn draw(&mut self, canvas: &Canvas, font: &Font) {}
+    pub fn draw(&mut self, canvas: &Canvas) {}
 }
 
 ///"Video" represents video.
 #[derive(Debug)]
 pub struct Video {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
     hidden: bool,
-    range: IRect,
+    id: String,
+    ordinal: Ordinal,
+    tip: String,
+    range: RectangleRange,
     background: Color,
 }
 
 impl Video {
     pub fn new() -> Self {
         Video {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
             hidden: false,
-            range: IRect::new_empty(),
+            id: String::new(),
+            ordinal: Ordinal::None,
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -169,11 +193,13 @@ impl Video {
 
     text!();
 
-    id_class!();
-
-    tip!();
+    class_id!();
 
     hidden!();
+
+    ordinal!();
+
+    tip!();
 
     range_background!();
 
