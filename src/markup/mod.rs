@@ -4,8 +4,9 @@ use crate::content::{Audio, Button, Canv, Form, Iframe, Img, Inp, Opt, Pt, Selec
 use crate::css::Css;
 use crate::grid::{Area, Body, Dialog};
 use crate::head::{Head, Title};
+use crate::parts::{Ordinal, Points};
 use crate::script::Script;
-use crate::utils::{to_bool, to_i32};
+use crate::utils::{to_bool, to_isize};
 use skia_safe::Canvas;
 use std::collections::VecDeque;
 use std::fmt::Debug;
@@ -58,28 +59,28 @@ pub enum Mark {
 
 impl Mark {
     ///Converts a string slice to `Mark`.
-    pub fn from(s: String) -> Result<Mark, String> {
+    pub fn from(s: String) -> Result<Self, String> {
         match s.as_str() {
-            AHT => Ok(Mark::AHT),
-            AREA => Ok(Mark::AREA),
-            AUDIO => Ok(Mark::AUDIO),
-            BODY => Ok(Mark::BODY),
-            BUTTON => Ok(Mark::BUTTON),
-            CANVAS => Ok(Mark::CANVAS),
-            CSS => Ok(Mark::CSS),
-            DIALOG => Ok(Mark::DIALOG),
-            FORM => Ok(Mark::FORM),
-            HEAD => Ok(Mark::HEAD),
-            IFRAME => Ok(Mark::IFRAME),
-            IMG => Ok(Mark::IMG),
-            INP => Ok(Mark::INP),
-            OPTION => Ok(Mark::OPTION),
-            PT => Ok(Mark::PT),
-            SCRIPT => Ok(Mark::SCRIPT),
-            SELECT => Ok(Mark::SELECT),
-            TIME => Ok(Mark::TIME),
-            TITLE => Ok(Mark::TITLE),
-            VIDEO => Ok(Mark::VIDEO),
+            AHT => Ok(Self::AHT),
+            AREA => Ok(Self::AREA),
+            AUDIO => Ok(Self::AUDIO),
+            BODY => Ok(Self::BODY),
+            BUTTON => Ok(Self::BUTTON),
+            CANVAS => Ok(Self::CANVAS),
+            CSS => Ok(Self::CSS),
+            DIALOG => Ok(Self::DIALOG),
+            FORM => Ok(Self::FORM),
+            HEAD => Ok(Self::HEAD),
+            IFRAME => Ok(Self::IFRAME),
+            IMG => Ok(Self::IMG),
+            INP => Ok(Self::INP),
+            OPTION => Ok(Self::OPTION),
+            PT => Ok(Self::PT),
+            SCRIPT => Ok(Self::SCRIPT),
+            SELECT => Ok(Self::SELECT),
+            TIME => Ok(Self::TIME),
+            TITLE => Ok(Self::TITLE),
+            VIDEO => Ok(Self::VIDEO),
             _ => Err(s),
         }
     }
@@ -111,112 +112,52 @@ pub enum TypeEntity {
 }
 
 impl TypeEntity {
-    fn from(o: ValidElement) -> TypeEntity {
+    fn from(o: ValidElement) -> Self {
         let (n, s, mut attribute, mut subset) = o.take();
         match n {
-            Mark::AHT => {
-                let vec = subset.drain(..).map(|o| TypeEntity::from(o)).collect();
-                TypeEntity::PAGE(Page::new(vec))
-            }
-            Mark::AREA => {
-                to_type!(o, Area, s, attribute, subset);
-                TypeEntity::AREA(o)
-            }
-            Mark::AUDIO => {
-                to_type!(o, Audio, s, attribute, subset);
-                TypeEntity::AUDIO(o)
-            }
-            Mark::BODY => {
-                to_type!(o, Body, s, attribute, subset);
-                TypeEntity::BODY(o)
-            }
-            Mark::BUTTON => {
-                to_type!(o, Button, s, attribute, subset);
-                TypeEntity::BUTTON(o)
-            }
-            Mark::CANVAS => {
-                to_type!(o, Canv, s, attribute, subset);
-                TypeEntity::CANVAS(o)
-            }
-            Mark::CSS => {
-                to_type!(o, Css, s, attribute, subset);
-                TypeEntity::CSS(o)
-            }
-            Mark::DIALOG => {
-                to_type!(o, Dialog, s, attribute, subset);
-                TypeEntity::DIALOG(o)
-            }
-            Mark::FORM => {
-                to_type!(o, Form, s, attribute, subset);
-                TypeEntity::FORM(o)
-            }
-            Mark::HEAD => {
-                to_type!(o, Head, s, attribute, subset);
-                TypeEntity::HEAD(o)
-            }
-            Mark::IFRAME => {
-                to_type!(o, Iframe, s, attribute, subset);
-                TypeEntity::IFRAME(o)
-            }
-            Mark::IMG => {
-                to_type!(o, Img, s, attribute, subset);
-                TypeEntity::IMG(o)
-            }
-            Mark::INP => {
-                to_type!(o, Inp, s, attribute, subset);
-                TypeEntity::INP(o)
-            }
-            Mark::OPTION => {
-                let mut o = Opt::new();
-                o.set_text(s);
-                for attr in attribute.drain(..) {
-                    o.attr(attr);
-                }
-                TypeEntity::OPTION(o)
-            }
-            Mark::PT => {
-                to_type!(o, Pt, s, attribute, subset);
-                TypeEntity::PT(o)
-            }
-            Mark::SCRIPT => {
-                to_type!(o, Script, s, attribute, subset);
-                TypeEntity::SCRIPT(o)
-            }
-            Mark::SELECT => {
-                to_type!(o, Select, s, attribute, subset);
-                TypeEntity::SELECT(o)
-            }
-            Mark::TIME => {
-                to_type!(o, Time, s, attribute, subset);
-                TypeEntity::TIME(o)
-            }
-            Mark::TITLE => {
-                to_type!(o, Title, s, attribute, subset);
-                TypeEntity::TITLE(o)
-            }
-            Mark::VIDEO => {
-                to_type!(o, Video, s, attribute, subset);
-                TypeEntity::VIDEO(o)
-            }
+            Mark::AHT => Self::PAGE(Page::new(subset.drain(..).map(|o| Self::from(o)).collect())),
+            Mark::AREA => Self::AREA(to_type!(Area, s, attribute, subset)),
+            Mark::AUDIO => Self::AUDIO(to_type!(Audio, s, attribute, subset)),
+            Mark::BODY => Self::BODY(to_type!(Body, s, attribute, subset)),
+            Mark::BUTTON => Self::BUTTON(to_type!(Button, s, attribute, subset)),
+            Mark::CANVAS => Self::CANVAS(to_type!(Canv, s, attribute, subset)),
+            Mark::CSS => Self::CSS(to_type!(Css, s, attribute, subset)),
+            Mark::DIALOG => Self::DIALOG(to_type!(Dialog, s, attribute, subset)),
+            Mark::FORM => Self::FORM(to_type!(Form, s, attribute, subset)),
+            Mark::HEAD => Self::HEAD(to_type!(Head, s, attribute, subset)),
+            Mark::IFRAME => Self::IFRAME(to_type!(Iframe, s, attribute, subset)),
+            Mark::IMG => Self::IMG(to_type!(Img, s, attribute, subset)),
+            Mark::INP => Self::INP(to_type!(Inp, s, attribute, subset)),
+            Mark::OPTION => Self::OPTION(to_type!(Opt, s, attribute)),
+            Mark::PT => Self::PT(to_type!(Pt, s, attribute, subset)),
+            Mark::SCRIPT => Self::SCRIPT(to_type!(Script, s, attribute, subset)),
+            Mark::SELECT => Self::SELECT(to_type!(Select, s, attribute, subset)),
+            Mark::TIME => Self::TIME(to_type!(Time, s, attribute, subset)),
+            Mark::TITLE => Self::TITLE(to_type!(Title, s, attribute, subset)),
+            Mark::VIDEO => Self::VIDEO(to_type!(Video, s, attribute, subset)),
         }
     }
 
     ///Parse a string slice to `TypeEntity`.
-    pub fn from_str(buf: &str) -> Option<TypeEntity> {
-        format::accept(buf).map(|o| TypeEntity::from(o))
+    pub fn from_str(buf: &str) -> Option<Self> {
+        format::accept(buf).map(|o| Self::from(o))
     }
 }
 
+const ACTION: &str = "action";
 const ASYNCHRONOUS: &str = "async";
 const CLASS: &str = "class";
 const COLUMN: &str = "column";
 const DISABLED: &str = "disabled";
+const ENCTYPE: &str = "enctype";
 const HEIGHT: &str = "height";
 const HIDDEN: &str = "hidden";
 const HREF: &str = "href";
 const ID: &str = "id";
+const METHOD: &str = "method";
 const MULTIPLE: &str = "multiple";
 const NAME: &str = "name ";
+const ORDINAL: &str = "ordinal ";
 const READONLY: &str = "readonly";
 const REQUIRED: &str = "required";
 const ROW: &str = "row";
@@ -241,24 +182,28 @@ const ONSCROLL: &str = "onscroll";
 ///Attribute.
 #[derive(Debug)]
 pub enum Attribute {
+    ACTION(String),
     ASYNCHRONOUS(bool),
     CLASS(String),
-    COLUMN(i32),
+    COLUMN(Points),
     DISABLED(bool),
-    HEIGHT(i32),
+    ENCTYPE(String),
+    HEIGHT(isize),
     HIDDEN(bool),
     HREF(String),
     ID(String),
+    METHOD(String),
     MULTIPLE(bool),
     NAME(String),
+    ORDINAL(Ordinal),
     READONLY(bool),
     REQUIRED(bool),
-    ROW(i32),
+    ROW(Points),
     SELECTED(bool),
     SRC(String),
     TIP(String),
     VALUE(String),
-    WIDTH(i32),
+    WIDTH(isize),
     ONABORT(String),
     ONBLUR(String),
     ONCANCEL(String),
@@ -274,134 +219,144 @@ pub enum Attribute {
 
 impl Attribute {
     ///Converts a pair of string slice to an `Attribute`.
-    pub fn from(a: &str, s: Option<String>) -> Result<Attribute, Option<String>> {
+    pub fn from(a: &str, s: Option<String>) -> Result<Self, Option<String>> {
         match a {
+            ACTION => match s {
+                Some(s) => Ok(Self::ACTION(s)),
+                None => Err(s),
+            },
             ASYNCHRONOUS => match s {
-                Some(s) => Ok(Attribute::ASYNCHRONOUS(to_bool(s))),
-                None => Ok(Attribute::ASYNCHRONOUS(true)),
+                Some(s) => Ok(Self::ASYNCHRONOUS(to_bool(&s))),
+                None => Ok(Self::ASYNCHRONOUS(true)),
             },
             CLASS => match s {
-                Some(s) => Ok(Attribute::CLASS(s)),
+                Some(s) => Ok(Self::CLASS(s)),
                 None => Err(s),
             },
             COLUMN => match s {
-                Some(s) => match to_i32(&s) {
-                    Some(i) => Ok(Attribute::COLUMN(i)),
-                    None => Err(Some(s)),
-                },
+                Some(s) => Ok(Self::COLUMN(Points::from_str(&s))),
                 None => Err(s),
             },
             DISABLED => match s {
-                Some(s) => Ok(Attribute::DISABLED(to_bool(s))),
-                None => Ok(Attribute::DISABLED(true)),
+                Some(s) => Ok(Self::DISABLED(to_bool(&s))),
+                None => Ok(Self::DISABLED(true)),
+            },
+            ENCTYPE => match s {
+                Some(s) => Ok(Self::ENCTYPE(s)),
+                None => Err(s),
             },
             HEIGHT => match s {
-                Some(s) => match to_i32(&s) {
-                    Some(i) => Ok(Attribute::HEIGHT(i)),
+                Some(s) => match to_isize(&s) {
+                    Some(i) => Ok(Self::HEIGHT(i)),
                     None => Err(Some(s)),
                 },
                 None => Err(s),
             },
             HIDDEN => match s {
-                Some(s) => Ok(Attribute::HIDDEN(to_bool(s))),
-                None => Ok(Attribute::HIDDEN(true)),
+                Some(s) => Ok(Self::HIDDEN(to_bool(&s))),
+                None => Ok(Self::HIDDEN(true)),
             },
             HREF => match s {
-                Some(s) => Ok(Attribute::HREF(s)),
+                Some(s) => Ok(Self::HREF(s)),
                 None => Err(s),
             },
             ID => match s {
-                Some(s) => Ok(Attribute::ID(s)),
+                Some(s) => Ok(Self::ID(s)),
+                None => Err(s),
+            },
+            METHOD => match s {
+                Some(s) => Ok(Self::METHOD(s)),
                 None => Err(s),
             },
             MULTIPLE => match s {
-                Some(s) => Ok(Attribute::MULTIPLE(to_bool(s))),
-                None => Ok(Attribute::MULTIPLE(true)),
+                Some(s) => Ok(Self::MULTIPLE(to_bool(&s))),
+                None => Ok(Self::MULTIPLE(true)),
             },
             NAME => match s {
-                Some(s) => Ok(Attribute::NAME(s)),
+                Some(s) => Ok(Self::NAME(s)),
+                None => Err(s),
+            },
+            ORDINAL => match s {
+                Some(s) => Ok(Self::ORDINAL(Ordinal::from_str(&s))),
                 None => Err(s),
             },
             READONLY => match s {
-                Some(s) => Ok(Attribute::READONLY(to_bool(s))),
-                None => Ok(Attribute::READONLY(true)),
+                Some(s) => Ok(Self::READONLY(to_bool(&s))),
+                None => Ok(Self::READONLY(true)),
             },
             REQUIRED => match s {
-                Some(s) => Ok(Attribute::REQUIRED(to_bool(s))),
-                None => Ok(Attribute::REQUIRED(true)),
+                Some(s) => Ok(Self::REQUIRED(to_bool(&s))),
+                None => Ok(Self::REQUIRED(true)),
             },
             ROW => match s {
-                Some(s) => match to_i32(&s) {
-                    Some(i) => Ok(Attribute::ROW(i)),
-                    None => Err(Some(s)),
-                },
+                Some(s) => Ok(Self::ROW(Points::from_str(&s))),
                 None => Err(s),
             },
             SELECTED => match s {
-                Some(s) => Ok(Attribute::SELECTED(to_bool(s))),
-                None => Ok(Attribute::SELECTED(true)),
+                Some(s) => Ok(Self::SELECTED(to_bool(&s))),
+                None => Ok(Self::SELECTED(true)),
             },
             SRC => match s {
-                Some(s) => Ok(Attribute::SRC(s)),
+                Some(s) => Ok(Self::SRC(s)),
                 None => Err(s),
             },
             TIP => match s {
-                Some(s) => Ok(Attribute::TIP(s)),
+                Some(s) => Ok(Self::TIP(s)),
                 None => Err(s),
             },
             VALUE => match s {
-                Some(s) => Ok(Attribute::VALUE(s)),
+                Some(s) => Ok(Self::VALUE(s)),
                 None => Err(s),
             },
             WIDTH => match s {
-                Some(s) => match to_i32(&s) {
-                    Some(i) => Ok(Attribute::WIDTH(i)),
+                Some(s) => match to_isize(&s) {
+                    Some(i) => Ok(Self::WIDTH(i)),
                     None => Err(Some(s)),
                 },
                 None => Err(s),
             },
             ONABORT => match s {
-                Some(s) => Ok(Attribute::ONABORT(s)),
+                Some(s) => Ok(Self::ONABORT(s)),
                 None => Err(s),
             },
             ONBLUR => match s {
-                Some(s) => Ok(Attribute::ONBLUR(s)),
+                Some(s) => Ok(Self::ONBLUR(s)),
                 None => Err(s),
             },
             ONCANCEL => match s {
-                Some(s) => Ok(Attribute::ONCANCEL(s)),
+                Some(s) => Ok(Self::ONCANCEL(s)),
                 None => Err(s),
             },
             ONCHANGE => match s {
-                Some(s) => Ok(Attribute::ONCHANGE(s)),
+                Some(s) => Ok(Self::ONCHANGE(s)),
                 None => Err(s),
             },
             ONCLICK => match s {
-                Some(s) => Ok(Attribute::ONCLICK(s)),
+                Some(s) => Ok(Self::ONCLICK(s)),
                 None => Err(s),
             },
             ONCLOSE => match s {
-                Some(s) => Ok(Attribute::ONCLOSE(s)),
+                Some(s) => Ok(Self::ONCLOSE(s)),
                 None => Err(s),
             },
             ONFOCUS => match s {
-                Some(s) => Ok(Attribute::ONFOCUS(s)),
+                Some(s) => Ok(Self::ONFOCUS(s)),
                 None => Err(s),
             },
             ONINVALID => match s {
-                Some(s) => Ok(Attribute::ONINVALID(s)),
+                Some(s) => Ok(Self::ONINVALID(s)),
                 None => Err(s),
             },
             ONLOAD => match s {
-                Some(s) => Ok(Attribute::ONLOAD(s)),
+                Some(s) => Ok(Self::ONLOAD(s)),
                 None => Err(s),
             },
             ONRESIZE => match s {
-                Some(s) => Ok(Attribute::ONRESIZE(s)),
+                Some(s) => Ok(Self::ONRESIZE(s)),
                 None => Err(s),
             },
             ONSCROLL => match s {
-                Some(s) => Ok(Attribute::ONSCROLL(s)),
+                Some(s) => Ok(Self::ONSCROLL(s)),
                 None => Err(s),
             },
             _ => Err(s),
@@ -481,7 +436,7 @@ impl Page {
     }
 
     ///Parse a string slice to `Page`.
-    pub fn from_str(buf: &str) -> Option<Page> {
+    pub fn from_str(buf: &str) -> Option<Self> {
         match TypeEntity::from_str(buf)? {
             TypeEntity::PAGE(p) => Some(p),
             _ => None,
