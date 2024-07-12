@@ -1,54 +1,57 @@
 use crate::markup::{Attribute, TypeEntity, BUTTON, FORM, INP, OPTION, PT, SELECT, TIME};
-use crate::parts::{HorizontalAlign, Shape, VerticalAlign};
+use crate::parts::{
+    ApplyFont, HorizontalAlign, Ordinal, RectangleRange, Shape, Subset, VerticalAlign,
+};
 use skia_safe::utils::text_utils::Align;
-use skia_safe::{Canvas, Color, Font, IRect, Paint, Rect};
-use std::collections::VecDeque;
+use skia_safe::{Canvas, Color, Paint};
 
 ///"Button" represents a button.
 #[derive(Debug)]
 pub struct Button {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
-    class: String,
-    tip: String,
-    hidden: bool,
-    name: String,
-    value: String,
-    disabled: bool,
     asynchronous: bool,
+    class: String,
+    disabled: bool,
+    hidden: bool,
     href: String,
-    range: IRect,
+    id: String,
+    name: String,
+    ordinal: Ordinal,
+    tip: String,
+    value: String,
+    range: RectangleRange,
     background: Color,
     horizontal_align: HorizontalAlign,
     vertical_align: VerticalAlign,
-    font_color: Color,
+    apply_font: ApplyFont,
     shape: Shape,
     shape_background: Color,
-    border_width: i32,
+    border_width: isize,
     border_color: Color,
 }
 
 impl Button {
     pub fn new() -> Self {
         Button {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
-            class: String::new(),
-            tip: String::new(),
-            hidden: false,
-            name: String::new(),
-            value: String::new(),
-            disabled: false,
             asynchronous: false,
+            class: String::new(),
+            disabled: false,
+            hidden: false,
             href: String::new(),
-            range: IRect::new_empty(),
+            id: String::new(),
+            name: String::new(),
+            ordinal: Ordinal::None,
+            tip: String::new(),
+            value: String::new(),
+            range: RectangleRange::new(),
             background: Color::GRAY,
             horizontal_align: HorizontalAlign::Left,
             vertical_align: VerticalAlign::Middle,
-            font_color: Color::BLACK,
-            shape: Shape::Circle(0, 0, 0),
+            apply_font: ApplyFont::new(),
+            shape: Shape::Default,
             shape_background: Color::WHITE,
             border_width: 0,
             border_color: Color::BLACK,
@@ -57,9 +60,18 @@ impl Button {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
+            Attribute::ASYNCHRONOUS(a) => self.set_asynchronous(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::DISABLED(a) => self.set_disabled(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::HREF(a) => self.set_href(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::NAME(a) => self.set_name(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::VALUE(a) => self.set_value(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -70,64 +82,73 @@ impl Button {
 
     text!();
 
-    id_class!();
+    asynchronous!();
 
-    tip!();
-
-    hidden!();
-
-    name!();
-
-    value!();
+    class_id!();
 
     disabled!();
 
+    hidden!();
+
     href!();
+
+    name!();
+
+    ordinal!();
+
+    tip!();
+
+    value!();
 
     range_background!();
 
     align!();
 
-    font_color!();
+    apply_font!();
 
     shape_background_border!();
 
-    pub fn draw(&mut self, canvas: &Canvas, font: &Font) {}
+    pub fn draw(&mut self, canvas: &Canvas) {}
 }
 
 ///"Form" represents form.
 #[derive(Debug)]
 pub struct Form {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
-    class: String,
     action: String,
+    asynchronous: bool,
+    class: String,
+    enctype: String,
+    id: String,
     method: String,
     name: String,
-    enctype: String,
-    asynchronous: bool,
 }
 
 impl Form {
     pub fn new() -> Self {
         Form {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
-            class: String::new(),
             action: String::new(),
+            asynchronous: false,
+            class: String::new(),
+            enctype: String::new(),
+            id: String::new(),
             method: String::new(),
             name: String::new(),
-            enctype: String::new(),
-            asynchronous: false,
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
+            Attribute::ACTION(a) => self.set_action(a),
+            Attribute::ASYNCHRONOUS(a) => self.set_asynchronous(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::ENCTYPE(a) => self.set_enctype(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::METHOD(a) => self.set_method(a),
+            Attribute::NAME(a) => self.set_name(a),
             _ => {}
         }
     }
@@ -138,7 +159,15 @@ impl Form {
 
     text!();
 
-    id_class!();
+    action!();
+
+    asynchronous!();
+
+    class_id!();
+
+    enctype!();
+
+    method!();
 
     name!();
 
@@ -148,50 +177,52 @@ impl Form {
 ///"Inp" represents input.
 #[derive(Debug)]
 pub struct Inp {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    name: String,
-    value: String,
-    tip: String,
-    hidden: bool,
-    readonly: bool,
     disabled: bool,
-    required: bool,
+    hidden: bool,
+    id: String,
     multiple: bool,
-    range: IRect,
+    name: String,
+    ordinal: Ordinal,
+    readonly: bool,
+    required: bool,
+    tip: String,
+    value: String,
+    range: RectangleRange,
     background: Color,
     horizontal_align: HorizontalAlign,
     vertical_align: VerticalAlign,
-    font_color: Color,
+    apply_font: ApplyFont,
     shape: Shape,
     shape_background: Color,
-    border_width: i32,
+    border_width: isize,
     border_color: Color,
 }
 
 impl Inp {
     pub fn new() -> Self {
         Inp {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            name: String::new(),
-            value: String::new(),
-            tip: String::new(),
-            hidden: false,
-            readonly: false,
             disabled: false,
-            required: false,
+            hidden: false,
+            id: String::new(),
             multiple: false,
-            range: IRect::new_empty(),
+            name: String::new(),
+            ordinal: Ordinal::None,
+            readonly: false,
+            required: false,
+            tip: String::new(),
+            value: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
             horizontal_align: HorizontalAlign::Left,
             vertical_align: VerticalAlign::Middle,
-            font_color: Color::BLACK,
-            shape: Shape::Rectangle(IRect::new_empty()),
+            apply_font: ApplyFont::new(),
+            shape: Shape::Default,
             shape_background: Color::WHITE,
             border_width: 0,
             border_color: Color::WHITE,
@@ -200,9 +231,19 @@ impl Inp {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::DISABLED(a) => self.set_disabled(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::MULTIPLE(a) => self.set_multiple(a),
+            Attribute::NAME(a) => self.set_name(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
+            Attribute::READONLY(a) => self.set_readonly(a),
+            Attribute::REQUIRED(a) => self.set_required(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::VALUE(a) => self.set_value(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -213,56 +254,61 @@ impl Inp {
 
     text!();
 
-    id_class!();
-
-    tip!();
-
-    hidden!();
-
-    name!();
-
-    value!();
-
-    readonly!();
+    class_id!();
 
     disabled!();
 
-    required!();
+    hidden!();
 
     multiple!();
+
+    name!();
+
+    ordinal!();
+
+    readonly!();
+
+    required!();
+
+    tip!();
+
+    value!();
 
     range_background!();
 
     align!();
 
-    font_color!();
+    apply_font!();
 
     shape_background_border!();
 
-    pub fn draw(&mut self, canvas: &Canvas, font: &Font) {}
+    pub fn draw(&mut self, canvas: &Canvas) {}
 }
 
 ///"Opt" represents an option.
 #[derive(Debug)]
 pub struct Opt {
     text: String,
-    value: String,
     disabled: bool,
     selected: bool,
+    value: String,
 }
 
 impl Opt {
     pub fn new() -> Self {
         Opt {
             text: String::new(),
-            value: String::new(),
             disabled: false,
             selected: false,
+            value: String::new(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
+            Attribute::DISABLED(a) => self.set_disabled(a),
+            Attribute::SELECTED(a) => self.set_selected(a),
+            Attribute::VALUE(a) => self.set_value(a),
             _ => {}
         }
     }
@@ -271,11 +317,11 @@ impl Opt {
 
     text!();
 
-    value!();
-
     disabled!();
 
     selected!();
+
+    value!();
 
     pub fn draw(&mut self, canvas: &Canvas) {}
 }
@@ -283,38 +329,40 @@ impl Opt {
 ///"Pt" represents plain text.
 #[derive(Debug)]
 pub struct Pt {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
     hidden: bool,
-    range: IRect,
+    id: String,
+    ordinal: Ordinal,
+    tip: String,
+    range: RectangleRange,
     background: Color,
     horizontal_align: HorizontalAlign,
     vertical_align: VerticalAlign,
-    font_color: Color,
+    apply_font: ApplyFont,
     shape: Shape,
     shape_background: Color,
-    border_width: i32,
+    border_width: isize,
     border_color: Color,
 }
 
 impl Pt {
     pub fn new() -> Self {
         Pt {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
             hidden: false,
-            range: IRect::new_empty(),
+            id: String::new(),
+            ordinal: Ordinal::None,
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::GRAY,
             horizontal_align: HorizontalAlign::Left,
             vertical_align: VerticalAlign::Middle,
-            font_color: Color::BLACK,
-            shape: Shape::Circle(0, 0, 0),
+            apply_font: ApplyFont::new(),
+            shape: Shape::Default,
             shape_background: Color::WHITE,
             border_width: 0,
             border_color: Color::BLACK,
@@ -323,9 +371,13 @@ impl Pt {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -336,66 +388,70 @@ impl Pt {
 
     text!();
 
-    id_class!();
-
-    tip!();
+    class_id!();
 
     hidden!();
+
+    ordinal!();
+
+    tip!();
 
     range_background!();
 
     align!();
 
-    font_color!();
+    apply_font!();
 
     shape_background_border!();
 
-    pub fn draw(&mut self, canvas: &Canvas, font: &Font) {}
+    pub fn draw(&mut self, canvas: &Canvas) {}
 }
 
 ///"Select" represents a select.
 #[derive(Debug)]
 pub struct Select {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
-    hidden: bool,
-    name: String,
     disabled: bool,
-    required: bool,
+    hidden: bool,
+    id: String,
     multiple: bool,
-    range: IRect,
+    name: String,
+    ordinal: Ordinal,
+    required: bool,
+    tip: String,
+    range: RectangleRange,
     background: Color,
     horizontal_align: HorizontalAlign,
     vertical_align: VerticalAlign,
-    font_color: Color,
+    apply_font: ApplyFont,
     shape: Shape,
     shape_background: Color,
-    border_width: i32,
+    border_width: isize,
     border_color: Color,
 }
 
 impl Select {
     pub fn new() -> Self {
         Select {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
-            hidden: false,
-            name: String::new(),
             disabled: false,
-            required: false,
+            hidden: false,
+            id: String::new(),
             multiple: false,
-            range: IRect::new_empty(),
+            name: String::new(),
+            ordinal: Ordinal::None,
+            required: false,
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
             horizontal_align: HorizontalAlign::Left,
             vertical_align: VerticalAlign::Middle,
-            font_color: Color::BLACK,
-            shape: Shape::Rectangle(IRect::new_empty()),
+            apply_font: ApplyFont::new(),
+            shape: Shape::Default,
             shape_background: Color::WHITE,
             border_width: 0,
             border_color: Color::WHITE,
@@ -404,9 +460,17 @@ impl Select {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::DISABLED(a) => self.set_disabled(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::MULTIPLE(a) => self.set_multiple(a),
+            Attribute::NAME(a) => self.set_name(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
+            Attribute::REQUIRED(a) => self.set_required(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -417,25 +481,27 @@ impl Select {
 
     text!();
 
-    id_class!();
-
-    tip!();
-
-    hidden!();
-
-    name!();
+    class_id!();
 
     disabled!();
 
-    required!();
+    hidden!();
 
     multiple!();
+
+    name!();
+
+    ordinal!();
+
+    required!();
+
+    tip!();
 
     range_background!();
 
     align!();
 
-    font_color!();
+    apply_font!();
 
     shape_background_border!();
 
@@ -445,48 +511,50 @@ impl Select {
 ///"Time" represents date time.
 #[derive(Debug)]
 pub struct Time {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    name: String,
-    value: String,
-    tip: String,
-    hidden: bool,
-    readonly: bool,
     disabled: bool,
+    hidden: bool,
+    id: String,
+    name: String,
+    ordinal: Ordinal,
+    readonly: bool,
     required: bool,
-    range: IRect,
+    tip: String,
+    value: String,
+    range: RectangleRange,
     background: Color,
     horizontal_align: HorizontalAlign,
     vertical_align: VerticalAlign,
-    font_color: Color,
+    apply_font: ApplyFont,
     shape: Shape,
     shape_background: Color,
-    border_width: i32,
+    border_width: isize,
     border_color: Color,
 }
 
 impl Time {
     pub fn new() -> Self {
         Time {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            name: String::new(),
-            value: String::new(),
-            tip: String::new(),
-            hidden: false,
-            readonly: false,
             disabled: false,
+            hidden: false,
+            id: String::new(),
+            name: String::new(),
+            ordinal: Ordinal::None,
+            readonly: false,
             required: false,
-            range: IRect::new_empty(),
+            tip: String::new(),
+            value: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
             horizontal_align: HorizontalAlign::Left,
             vertical_align: VerticalAlign::Middle,
-            font_color: Color::BLACK,
-            shape: Shape::Rectangle(IRect::new_empty()),
+            apply_font: ApplyFont::new(),
+            shape: Shape::Default,
             shape_background: Color::WHITE,
             border_width: 0,
             border_color: Color::WHITE,
@@ -495,9 +563,18 @@ impl Time {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::DISABLED(a) => self.set_disabled(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::NAME(a) => self.set_name(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
+            Attribute::READONLY(a) => self.set_readonly(a),
+            Attribute::REQUIRED(a) => self.set_required(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::VALUE(a) => self.set_value(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -508,27 +585,29 @@ impl Time {
 
     text!();
 
-    id_class!();
+    class_id!();
 
-    tip!();
+    disabled!();
 
     hidden!();
 
     name!();
 
-    value!();
+    ordinal!();
 
     readonly!();
 
-    disabled!();
-
     required!();
+
+    tip!();
+
+    value!();
 
     range_background!();
 
     align!();
 
-    font_color!();
+    apply_font!();
 
     shape_background_border!();
 
