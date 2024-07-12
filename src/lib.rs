@@ -15,7 +15,6 @@
 mod macros;
 pub mod content;
 pub mod css;
-pub mod font;
 pub mod grid;
 pub mod head;
 pub mod markup;
