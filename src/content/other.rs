@@ -1,39 +1,45 @@
 use crate::markup::{Attribute, TypeEntity, CANVAS, IFRAME};
-use skia_safe::{Canvas, Color, IRect, Paint, Rect};
-use std::collections::VecDeque;
+use crate::parts::{Ordinal, RectangleRange, Subset};
+use skia_safe::{Canvas, Color, Paint};
 
 ///"Canv" represents canvas.
 #[derive(Debug)]
 pub struct Canv {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
     hidden: bool,
-    range: IRect,
+    id: String,
+    ordinal: Ordinal,
+    tip: String,
+    range: RectangleRange,
     background: Color,
 }
 
 impl Canv {
     pub fn new() -> Self {
         Canv {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
             hidden: false,
-            range: IRect::new_empty(),
+            id: String::new(),
+            ordinal: Ordinal::None,
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::ORDINAL(a) => self.set_ordinal(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -44,11 +50,13 @@ impl Canv {
 
     text!();
 
-    id_class!();
-
-    tip!();
+    class_id!();
 
     hidden!();
+
+    ordinal!();
+
+    tip!();
 
     range_background!();
 
@@ -58,37 +66,41 @@ impl Canv {
 ///"Iframe" represents iframe.
 #[derive(Debug)]
 pub struct Iframe {
-    subset: VecDeque<TypeEntity>,
+    subset: Subset,
     text: String,
-    id: String,
     class: String,
-    tip: String,
     hidden: bool,
+    id: String,
     src: String,
-    range: IRect,
+    tip: String,
+    range: RectangleRange,
     background: Color,
 }
 
 impl Iframe {
     pub fn new() -> Self {
         Iframe {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
-            tip: String::new(),
             hidden: false,
+            id: String::new(),
             src: String::new(),
-            range: IRect::new_empty(),
+            tip: String::new(),
+            range: RectangleRange::new(),
             background: Color::WHITE,
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
             Attribute::CLASS(a) => self.set_class(a),
+            Attribute::HEIGHT(a) => self.set_height(a),
+            Attribute::HIDDEN(a) => self.set_hidden(a),
+            Attribute::ID(a) => self.set_id(a),
+            Attribute::SRC(a) => self.set_src(a),
             Attribute::TIP(a) => self.set_tip(a),
+            Attribute::WIDTH(a) => self.set_width(a),
             _ => {}
         }
     }
@@ -99,11 +111,13 @@ impl Iframe {
 
     text!();
 
-    id_class!();
-
-    tip!();
+    class_id!();
 
     hidden!();
+
+    src!();
+
+    tip!();
 
     range_background!();
 
@@ -113,6 +127,6 @@ impl Iframe {
         }
         let mut paint = Paint::default();
         paint.set_color(self.background);
-        canvas.draw_irect(self.range, &paint);
+        canvas.draw_irect(self.range.to_irect(), &paint);
     }
 }
