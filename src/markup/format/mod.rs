@@ -2,24 +2,8 @@ mod x;
 
 use self::x::{Context, XParser};
 use super::{Attribute, Mark, ValidElement};
+use crate::utils::ascii::*;
 use std::collections::{HashMap, VecDeque};
-
-//'<'
-pub(crate) const LT: char = '<';
-//'>'
-pub(crate) const GT: char = '>';
-//'/'
-pub(crate) const SLASH: char = '/';
-//' '
-pub(crate) const SPACE: char = ' ';
-//'\r'
-pub(crate) const CR: char = '\r';
-//'\n'
-pub(crate) const LF: char = '\n';
-//'='
-pub(crate) const EQUAL: char = '=';
-//'"'
-pub(crate) const QUOTATION: char = '"';
 
 #[inline]
 fn is_crlf(c: char) -> bool {
