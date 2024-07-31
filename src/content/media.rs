@@ -1,19 +1,23 @@
+use super::*;
 use crate::markup::{Attribute, TypeEntity, AUDIO, IMG, VIDEO};
-use crate::parts::{HorizontalAlign, Ordinal, RectangleRange, Shape, Subset, VerticalAlign};
-use skia_safe::{Canvas, Color, Image, Paint};
+use crate::parts::{AlignPattern, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset};
+use skia_safe::Canvas;
 
 ///"Audio" represents audio stream.
 #[derive(Debug)]
 pub struct Audio {
-    subset: Subset,
-    text: String,
-    class: String,
-    hidden: bool,
-    id: String,
-    ordinal: Ordinal,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    parent: *mut TypeEntity,
 }
 
 impl Audio {
@@ -26,62 +30,65 @@ impl Audio {
             id: String::new(),
             ordinal: Ordinal::None,
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::center_middle(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(AUDIO);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.hidden {
+            return;
+        }
 
-    hidden!();
-
-    ordinal!();
-
-    tip!();
-
-    range_background!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.background.as_mut().act(&r, canvas);
+        self.subset.draw(canvas);
+    }
 }
 
 ///"Img" represents an image.
 #[derive(Debug)]
 pub struct Img {
-    subset: Subset,
-    text: String,
-    class: String,
-    hidden: bool,
-    id: String,
-    ordinal: Ordinal,
-    src: String,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
-    horizontal_align: HorizontalAlign,
-    vertical_align: VerticalAlign,
-    shape: Shape,
-    shape_background: Color,
-    border_width: isize,
-    border_color: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
+    pub src: String,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub outside: Box<dyn OutPainter>,
+    scroll_bar: ScrollBar,
+    parent: *mut TypeEntity,
 }
 
 impl Img {
@@ -95,68 +102,66 @@ impl Img {
             ordinal: Ordinal::None,
             src: String::new(),
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::GRAY,
-            horizontal_align: HorizontalAlign::Left,
-            vertical_align: VerticalAlign::Middle,
-            shape: Shape::Default,
-            shape_background: Color::WHITE,
-            border_width: 0,
-            border_color: Color::BLACK,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::center_middle(),
+            outside: Box::new(Border::new()),
+            scroll_bar: ScrollBar::new(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::SRC(a) => self.set_src(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::SRC(a) => self.src = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(IMG);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.hidden {
+            return;
+        }
 
-    hidden!();
-
-    ordinal!();
-
-    src!();
-
-    tip!();
-
-    range_background!();
-
-    align!();
-
-    shape_background_border!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.outside.as_mut().act(&r, canvas);
+        self.background.as_mut().act(&r, canvas);
+        self.subset.draw(canvas);
+    }
 }
 
 ///"Video" represents video.
 #[derive(Debug)]
 pub struct Video {
-    subset: Subset,
-    text: String,
-    class: String,
-    hidden: bool,
-    id: String,
-    ordinal: Ordinal,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    parent: *mut TypeEntity,
 }
 
 impl Video {
@@ -169,39 +174,43 @@ impl Video {
             id: String::new(),
             ordinal: Ordinal::None,
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::center_middle(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(VIDEO);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.hidden {
+            return;
+        }
 
-    hidden!();
-
-    ordinal!();
-
-    tip!();
-
-    range_background!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.background.as_mut().act(&r, canvas);
+        self.subset.draw(canvas);
+    }
 }
