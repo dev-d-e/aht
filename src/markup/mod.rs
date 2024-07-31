@@ -2,11 +2,11 @@ mod format;
 
 use crate::content::{Audio, Button, Canv, Form, Iframe, Img, Inp, Opt, Pt, Select, Time, Video};
 use crate::css::Css;
-use crate::grid::{Area, Body, Dialog};
-use crate::head::{Head, Title};
-use crate::parts::{Ordinal, Points};
+use crate::grid::{Area, Body};
+use crate::head::{Aht, Head, Title};
+use crate::parts::{Distance, Ordinal, Points};
 use crate::script::Script;
-use crate::utils::{to_bool, to_isize};
+use crate::utils::to_bool;
 use skia_safe::Canvas;
 use std::collections::VecDeque;
 use std::fmt::Debug;
@@ -18,7 +18,6 @@ pub(crate) const BODY: &str = "body";
 pub(crate) const BUTTON: &str = "button";
 pub(crate) const CANVAS: &str = "canvas";
 pub(crate) const CSS: &str = "css";
-pub(crate) const DIALOG: &str = "dialog";
 pub(crate) const FORM: &str = "form";
 pub(crate) const HEAD: &str = "head";
 pub(crate) const IFRAME: &str = "iframe";
@@ -42,7 +41,6 @@ pub enum Mark {
     BUTTON,
     CANVAS,
     CSS,
-    DIALOG,
     FORM,
     HEAD,
     IFRAME,
@@ -68,7 +66,6 @@ impl Mark {
             BUTTON => Ok(Self::BUTTON),
             CANVAS => Ok(Self::CANVAS),
             CSS => Ok(Self::CSS),
-            DIALOG => Ok(Self::DIALOG),
             FORM => Ok(Self::FORM),
             HEAD => Ok(Self::HEAD),
             IFRAME => Ok(Self::IFRAME),
@@ -84,19 +81,42 @@ impl Mark {
             _ => Err(s),
         }
     }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Mark::AHT => AHT,
+            Mark::AREA => AREA,
+            Mark::AUDIO => AUDIO,
+            Mark::BODY => BODY,
+            Mark::BUTTON => BUTTON,
+            Mark::CANVAS => CANVAS,
+            Mark::CSS => CSS,
+            Mark::FORM => FORM,
+            Mark::HEAD => HEAD,
+            Mark::IFRAME => IFRAME,
+            Mark::IMG => IMG,
+            Mark::INP => INP,
+            Mark::OPTION => OPTION,
+            Mark::PT => PT,
+            Mark::SCRIPT => SCRIPT,
+            Mark::SELECT => SELECT,
+            Mark::TIME => TIME,
+            Mark::TITLE => TITLE,
+            Mark::VIDEO => VIDEO,
+        }
+    }
 }
 
 ///TypeEntity.
 #[derive(Debug)]
 pub enum TypeEntity {
-    PAGE(Page),
+    AHT(Aht),
     AREA(Area),
     AUDIO(Audio),
     BODY(Body),
     BUTTON(Button),
     CANVAS(Canv),
     CSS(Css),
-    DIALOG(Dialog),
     FORM(Form),
     HEAD(Head),
     IFRAME(Iframe),
@@ -114,33 +134,183 @@ pub enum TypeEntity {
 impl TypeEntity {
     fn from(o: ValidElement) -> Self {
         let (n, s, mut attribute, mut subset) = o.take();
+
+        macro_rules! to_type {
+            ($t:ty) => {{
+                let mut o = <$t>::new();
+                o.text = s;
+                attribute.drain(..).for_each(|a| o.attr(a));
+                subset
+                    .drain(..)
+                    .for_each(|sub| o.subset.push_back(TypeEntity::from(sub)));
+                o
+            }};
+        }
+        macro_rules! to_type1 {
+            ($t:ty) => {{
+                let mut o = <$t>::new();
+                attribute.drain(..).for_each(|a| o.attr(a));
+                subset
+                    .drain(..)
+                    .for_each(|sub| o.subset.push_back(TypeEntity::from(sub)));
+                o
+            }};
+        }
+        macro_rules! to_type2 {
+            ($t:ty) => {{
+                let mut o = <$t>::new();
+                o.text = s;
+                attribute.drain(..).for_each(|a| o.attr(a));
+                o
+            }};
+        }
+
         match n {
-            Mark::AHT => Self::PAGE(Page::new(subset.drain(..).map(|o| Self::from(o)).collect())),
-            Mark::AREA => Self::AREA(to_type!(Area, s, attribute, subset)),
-            Mark::AUDIO => Self::AUDIO(to_type!(Audio, s, attribute, subset)),
-            Mark::BODY => Self::BODY(to_type!(Body, s, attribute, subset)),
-            Mark::BUTTON => Self::BUTTON(to_type!(Button, s, attribute, subset)),
-            Mark::CANVAS => Self::CANVAS(to_type!(Canv, s, attribute, subset)),
-            Mark::CSS => Self::CSS(to_type!(Css, s, attribute, subset)),
-            Mark::DIALOG => Self::DIALOG(to_type!(Dialog, s, attribute, subset)),
-            Mark::FORM => Self::FORM(to_type!(Form, s, attribute, subset)),
-            Mark::HEAD => Self::HEAD(to_type!(Head, s, attribute, subset)),
-            Mark::IFRAME => Self::IFRAME(to_type!(Iframe, s, attribute, subset)),
-            Mark::IMG => Self::IMG(to_type!(Img, s, attribute, subset)),
-            Mark::INP => Self::INP(to_type!(Inp, s, attribute, subset)),
-            Mark::OPTION => Self::OPTION(to_type!(Opt, s, attribute)),
-            Mark::PT => Self::PT(to_type!(Pt, s, attribute, subset)),
-            Mark::SCRIPT => Self::SCRIPT(to_type!(Script, s, attribute, subset)),
-            Mark::SELECT => Self::SELECT(to_type!(Select, s, attribute, subset)),
-            Mark::TIME => Self::TIME(to_type!(Time, s, attribute, subset)),
-            Mark::TITLE => Self::TITLE(to_type!(Title, s, attribute, subset)),
-            Mark::VIDEO => Self::VIDEO(to_type!(Video, s, attribute, subset)),
+            Mark::AHT => Self::AHT(to_type1!(Aht)),
+            Mark::AREA => Self::AREA(to_type!(Area)),
+            Mark::AUDIO => Self::AUDIO(to_type!(Audio)),
+            Mark::BODY => Self::BODY(to_type!(Body)),
+            Mark::BUTTON => Self::BUTTON(to_type!(Button)),
+            Mark::CANVAS => Self::CANVAS(to_type!(Canv)),
+            Mark::CSS => Self::CSS(to_type!(Css)),
+            Mark::FORM => Self::FORM(to_type!(Form)),
+            Mark::HEAD => Self::HEAD(to_type!(Head)),
+            Mark::IFRAME => Self::IFRAME(to_type!(Iframe)),
+            Mark::IMG => Self::IMG(to_type!(Img)),
+            Mark::INP => Self::INP(to_type!(Inp)),
+            Mark::OPTION => Self::OPTION(to_type2!(Opt)),
+            Mark::PT => Self::PT(to_type!(Pt)),
+            Mark::SCRIPT => Self::SCRIPT(to_type!(Script)),
+            Mark::SELECT => Self::SELECT(to_type!(Select)),
+            Mark::TIME => Self::TIME(to_type!(Time)),
+            Mark::TITLE => Self::TITLE(to_type!(Title)),
+            Mark::VIDEO => Self::VIDEO(to_type!(Video)),
         }
     }
 
     ///Parse a string slice to `TypeEntity`.
-    pub fn from_str(buf: &str) -> Option<Self> {
-        format::accept(buf).map(|o| Self::from(o))
+    pub fn from_str(buf: &str) -> VecDeque<Self> {
+        format::accept(buf)
+    }
+
+    ///Parse to `Page`.
+    pub fn to_page(self) -> Result<Page, Self> {
+        if let Self::AHT(o) = self {
+            Ok(Page::new(o.take()))
+        } else {
+            Err(self)
+        }
+    }
+
+    fn find_mark(&mut self, s: &str, v: &mut Vec<&mut TypeEntity>) {
+        let t = self as *mut TypeEntity;
+
+        macro_rules! find {
+            ($o:ident) => {{
+                if $o.element() == s {
+                    unsafe { v.push(&mut *t) }
+                }
+                for e in &mut $o.subset.vec {
+                    e.find_mark(s, v)
+                }
+            }};
+        }
+        match self {
+            TypeEntity::AHT(o) => find!(o),
+            TypeEntity::AREA(o) => find!(o),
+            TypeEntity::AUDIO(o) => find!(o),
+            TypeEntity::BODY(o) => find!(o),
+            TypeEntity::BUTTON(o) => find!(o),
+            TypeEntity::CANVAS(o) => find!(o),
+            TypeEntity::CSS(o) => find!(o),
+            TypeEntity::FORM(o) => find!(o),
+            TypeEntity::HEAD(o) => find!(o),
+            TypeEntity::IFRAME(o) => find!(o),
+            TypeEntity::IMG(o) => find!(o),
+            TypeEntity::INP(o) => find!(o),
+            TypeEntity::OPTION(_) => {}
+            TypeEntity::PT(o) => find!(o),
+            TypeEntity::SCRIPT(o) => find!(o),
+            TypeEntity::SELECT(o) => find!(o),
+            TypeEntity::TIME(o) => find!(o),
+            TypeEntity::TITLE(o) => find!(o),
+            TypeEntity::VIDEO(o) => find!(o),
+        }
+    }
+
+    fn find_class(&mut self, s: &str, v: &mut Vec<&mut TypeEntity>) {
+        let t = self as *mut TypeEntity;
+        macro_rules! find {
+            ($o:ident) => {{
+                if $o.class == s {
+                    unsafe { v.push(&mut *t) }
+                }
+                for e in &mut $o.subset.vec {
+                    e.find_class(s, v)
+                }
+            }};
+        }
+        match self {
+            TypeEntity::AHT(o) => find!(o),
+            TypeEntity::AREA(o) => find!(o),
+            TypeEntity::AUDIO(o) => find!(o),
+            TypeEntity::BODY(o) => find!(o),
+            TypeEntity::BUTTON(o) => find!(o),
+            TypeEntity::CANVAS(o) => find!(o),
+            TypeEntity::CSS(o) => find!(o),
+            TypeEntity::FORM(o) => find!(o),
+            TypeEntity::HEAD(o) => find!(o),
+            TypeEntity::IFRAME(o) => find!(o),
+            TypeEntity::IMG(o) => find!(o),
+            TypeEntity::INP(o) => find!(o),
+            TypeEntity::OPTION(_) => {}
+            TypeEntity::PT(o) => find!(o),
+            TypeEntity::SCRIPT(o) => find!(o),
+            TypeEntity::SELECT(o) => find!(o),
+            TypeEntity::TIME(o) => find!(o),
+            TypeEntity::TITLE(o) => find!(o),
+            TypeEntity::VIDEO(o) => find!(o),
+        }
+    }
+
+    fn find_id(&mut self, s: &str) -> Option<&mut TypeEntity> {
+        let t = self as *mut TypeEntity;
+        macro_rules! find {
+            ($o:ident) => {{
+                if $o.id == s {
+                    unsafe { Some(&mut *t) }
+                } else {
+                    for e in &mut $o.subset.vec {
+                        let t = e.find_id(s);
+                        if t.is_some() {
+                            return t;
+                        }
+                    }
+                    None
+                }
+            }};
+        }
+        match self {
+            TypeEntity::AHT(o) => find!(o),
+            TypeEntity::AREA(o) => find!(o),
+            TypeEntity::AUDIO(o) => find!(o),
+            TypeEntity::BODY(o) => find!(o),
+            TypeEntity::BUTTON(o) => find!(o),
+            TypeEntity::CANVAS(o) => find!(o),
+            TypeEntity::CSS(o) => find!(o),
+            TypeEntity::FORM(o) => find!(o),
+            TypeEntity::HEAD(o) => find!(o),
+            TypeEntity::IFRAME(o) => find!(o),
+            TypeEntity::IMG(o) => find!(o),
+            TypeEntity::INP(o) => find!(o),
+            TypeEntity::OPTION(_) => None,
+            TypeEntity::PT(o) => find!(o),
+            TypeEntity::SCRIPT(o) => find!(o),
+            TypeEntity::SELECT(o) => find!(o),
+            TypeEntity::TIME(o) => find!(o),
+            TypeEntity::TITLE(o) => find!(o),
+            TypeEntity::VIDEO(o) => find!(o),
+        }
     }
 }
 
@@ -154,10 +324,11 @@ const HEIGHT: &str = "height";
 const HIDDEN: &str = "hidden";
 const HREF: &str = "href";
 const ID: &str = "id";
+const LANG: &str = "lang";
 const METHOD: &str = "method";
 const MULTIPLE: &str = "multiple";
 const NAME: &str = "name ";
-const ORDINAL: &str = "ordinal ";
+const ORDINAL: &str = "ordinal";
 const READONLY: &str = "readonly";
 const REQUIRED: &str = "required";
 const ROW: &str = "row";
@@ -188,10 +359,11 @@ pub enum Attribute {
     COLUMN(Points),
     DISABLED(bool),
     ENCTYPE(String),
-    HEIGHT(isize),
+    HEIGHT(Distance),
     HIDDEN(bool),
     HREF(String),
     ID(String),
+    LANG(String),
     METHOD(String),
     MULTIPLE(bool),
     NAME(String),
@@ -203,7 +375,7 @@ pub enum Attribute {
     SRC(String),
     TIP(String),
     VALUE(String),
-    WIDTH(isize),
+    WIDTH(Distance),
     ONABORT(String),
     ONBLUR(String),
     ONCANCEL(String),
@@ -246,8 +418,8 @@ impl Attribute {
                 None => Err(s),
             },
             HEIGHT => match s {
-                Some(s) => match to_isize(&s) {
-                    Some(i) => Ok(Self::HEIGHT(i)),
+                Some(s) => match Distance::from_str(&s) {
+                    Some(s) => Ok(Self::HEIGHT(s)),
                     None => Err(Some(s)),
                 },
                 None => Err(s),
@@ -262,6 +434,10 @@ impl Attribute {
             },
             ID => match s {
                 Some(s) => Ok(Self::ID(s)),
+                None => Err(s),
+            },
+            LANG => match s {
+                Some(s) => Ok(Self::LANG(s)),
                 None => Err(s),
             },
             METHOD => match s {
@@ -309,8 +485,8 @@ impl Attribute {
                 None => Err(s),
             },
             WIDTH => match s {
-                Some(s) => match to_isize(&s) {
-                    Some(i) => Ok(Self::WIDTH(i)),
+                Some(s) => match Distance::from_str(&s) {
+                    Some(s) => Ok(Self::WIDTH(s)),
                     None => Err(Some(s)),
                 },
                 None => Err(s),
@@ -390,60 +566,171 @@ impl ValidElement {
 ///"Page" represents page.
 #[derive(Debug)]
 pub struct Page {
-    head: Head,
-    body: Body,
-    css: Css,
-    script: Script,
+    head: Option<Box<TypeEntity>>,
+    body: Option<Box<TypeEntity>>,
+    css: Option<Box<TypeEntity>>,
+    script: Option<Box<TypeEntity>>,
 }
 
 impl Page {
-    pub(crate) fn new(vd: VecDeque<TypeEntity>) -> Self {
-        let mut head = Head::new();
-        let mut body = Body::new();
-        let mut css = Css::new();
-        let mut script = Script::new();
-        for (i, o) in vd.into_iter().enumerate() {
-            match o {
-                TypeEntity::HEAD(t) => {
-                    if i == 0 {
-                        head = t;
-                    }
+    fn new(
+        t: (
+            Option<TypeEntity>,
+            Option<TypeEntity>,
+            Option<TypeEntity>,
+            Option<TypeEntity>,
+        ),
+    ) -> Self {
+        let mut page = Page {
+            head: t.0.map(|o| Box::new(o)),
+            body: t.1.map(|o| Box::new(o)),
+            css: t.2.map(|o| Box::new(o)),
+            script: t.3.map(|o| Box::new(o)),
+        };
+        let p = &mut page as *mut Page;
+        if let Some(t) = &mut page.body {
+            let t = t.as_mut();
+            let o = t as *mut TypeEntity;
+            if let TypeEntity::BODY(body) = t {
+                unsafe {
+                    body.set_parent(&mut *p, &mut *o);
                 }
-                TypeEntity::BODY(t) => {
-                    if i == 1 {
-                        body = t;
-                    }
-                }
-                TypeEntity::CSS(t) => {
-                    if i == 2 {
-                        css = t;
-                    }
-                }
-                TypeEntity::SCRIPT(t) => {
-                    if i == 3 {
-                        script = t;
-                    }
-                }
-                _ => {}
             }
         }
-        Page {
-            head,
-            body,
-            css,
-            script,
-        }
+        page
     }
 
     ///Parse a string slice to `Page`.
-    pub fn from_str(buf: &str) -> Option<Self> {
-        match TypeEntity::from_str(buf)? {
-            TypeEntity::PAGE(p) => Some(p),
-            _ => None,
+    pub fn from_str(buf: &str) -> Option<Result<Self, TypeEntity>> {
+        Some(TypeEntity::from_str(buf).pop_front()?.to_page())
+    }
+
+    ///Returns true if the `Page` doesn't contain `Head` or `Body` or `Css` or `Script`.
+    pub fn incomplete(&self) -> bool {
+        self.head.is_none() || self.body.is_none() || self.css.is_none() || self.script.is_none()
+    }
+
+    fn body(&mut self, f: impl Fn(&mut Body)) -> bool {
+        if let Some(t) = &mut self.body {
+            if let TypeEntity::BODY(body) = t.as_mut() {
+                f(body);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn set_zero(&mut self, x: isize, y: isize) {
+        self.body(|o| o.set_zero(x, y));
+    }
+
+    pub fn resize(&mut self, width: isize, height: isize) {
+        self.body(|o| o.resize(width, height));
+    }
+
+    ///Returns true if draw.
+    pub fn draw(&mut self, canvas: &Canvas) -> bool {
+        self.body(|o| o.draw(canvas))
+    }
+
+    pub fn find_mark(&mut self, s: Mark) -> Vec<&mut TypeEntity> {
+        self.find(Conditions::new_with_mark(s))
+    }
+
+    pub fn find_class(&mut self, s: &str) -> Vec<&mut TypeEntity> {
+        self.find(Conditions::new_with_class(s))
+    }
+
+    pub fn find_id(&mut self, s: &str) -> Option<&mut TypeEntity> {
+        let mut v = self.find(Conditions::new_with_id(s));
+        if v.is_empty() {
+            None
+        } else {
+            Some(v.remove(0))
         }
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas) {
-        self.body.draw(canvas);
+    fn head_body(&mut self) -> Vec<&mut TypeEntity> {
+        let mut v = Vec::new();
+        if let Some(t) = &mut self.head {
+            v.push(t.as_mut())
+        }
+        if let Some(t) = &mut self.body {
+            v.push(t.as_mut())
+        }
+        v
+    }
+
+    ///Find `TypeEntity` references by `Conditions`.
+    pub fn find(&mut self, conditions: Conditions) -> Vec<&mut TypeEntity> {
+        let mut v = self.head_body();
+        for c in conditions.v {
+            let mut r = Vec::new();
+            match c {
+                Condition::MARK(s) => {
+                    v.into_iter().for_each(|t| t.find_mark(s.as_str(), &mut r));
+                }
+                Condition::CLASS(s) => {
+                    v.into_iter().for_each(|t| t.find_class(&s, &mut r));
+                }
+                Condition::ID(s) => {
+                    for t in v {
+                        if let Some(p) = t.find_id(&s) {
+                            r.push(p);
+                            break;
+                        }
+                    }
+                }
+            }
+            v = r;
+        }
+        v
+    }
+}
+
+enum Condition {
+    MARK(Mark),
+    CLASS(String),
+    ID(String),
+}
+
+///find conditions.
+pub struct Conditions {
+    v: Vec<Condition>,
+}
+
+impl Conditions {
+    fn new() -> Self {
+        Self { v: Vec::new() }
+    }
+
+    pub fn new_with_mark(s: Mark) -> Self {
+        let mut c = Self::new();
+        c.mark(s);
+        c
+    }
+
+    pub fn new_with_class(s: impl Into<String>) -> Self {
+        let mut c = Self::new();
+        c.class(s);
+        c
+    }
+
+    pub fn new_with_id(s: impl Into<String>) -> Self {
+        let mut c = Self::new();
+        c.id(s);
+        c
+    }
+
+    pub fn mark(&mut self, s: Mark) {
+        self.v.push(Condition::MARK(s));
+    }
+
+    pub fn class(&mut self, s: impl Into<String>) {
+        self.v.push(Condition::CLASS(s.into()))
+    }
+
+    pub fn id(&mut self, s: impl Into<String>) {
+        self.v.push(Condition::ID(s.into()))
     }
 }
