@@ -28,6 +28,18 @@ pub(crate) mod ascii {
     pub(crate) const PER_CENT: char = '%';
 }
 
+pub(crate) mod color {
+    use skia_safe::Color;
+
+    pub(crate) const BG_COLOR: Color = Color::from_rgb(255, 255, 255);
+
+    pub(crate) const BORDER_COLOR: Color = Color::from_rgb(100, 100, 100);
+
+    pub(crate) const FONT_COLOR: Color = Color::from_rgb(0, 0, 0);
+
+    pub(crate) const SURFACE_COLOR: Color = Color::from_rgb(200, 200, 200);
+}
+
 pub(crate) fn to_bool(s: &str) -> bool {
     bool::from_str(s.trim()).unwrap_or(false)
 }
@@ -60,10 +72,13 @@ pub(crate) fn to_isize(s: &str) -> Option<isize> {
     }
 }
 
-pub fn get_font(s: &str) -> Font {
+pub fn get_font(s: &str) -> Option<Font> {
     let style = FontStyle::normal();
     let fm = FontMgr::new();
-    let tf = fm.match_family_style(s, style).unwrap();
-    let font: Font = Font::from_typeface(tf, None);
-    font
+    if let Some(tf) = fm.match_family_style(s, style) {
+        let font = Font::from_typeface(tf, None);
+        Some(font)
+    } else {
+        None
+    }
 }
