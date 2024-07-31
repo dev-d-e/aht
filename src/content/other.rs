@@ -1,19 +1,23 @@
 use crate::markup::{Attribute, TypeEntity, CANVAS, IFRAME};
-use crate::parts::{Ordinal, RectangleRange, Subset};
-use skia_safe::{Canvas, Color, Paint};
+use crate::parts::{AlignPattern, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset};
+use skia_safe::Canvas;
 
 ///"Canv" represents canvas.
 #[derive(Debug)]
 pub struct Canv {
-    subset: Subset,
-    text: String,
-    class: String,
-    hidden: bool,
-    id: String,
-    ordinal: Ordinal,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    scroll_bar: ScrollBar,
+    parent: *mut TypeEntity,
 }
 
 impl Canv {
@@ -26,55 +30,64 @@ impl Canv {
             id: String::new(),
             ordinal: Ordinal::None,
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+            zero: Coord::new(),
+            side: Sides::pixel(200, 100),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::center_middle(),
+            scroll_bar: ScrollBar::new(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(CANVAS);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.hidden {
+            return;
+        }
 
-    hidden!();
-
-    ordinal!();
-
-    tip!();
-
-    range_background!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.background.as_mut().act(&r, canvas);
+        self.subset.draw(canvas);
+    }
 }
 
 ///"Iframe" represents iframe.
 #[derive(Debug)]
 pub struct Iframe {
-    subset: Subset,
-    text: String,
-    class: String,
-    hidden: bool,
-    id: String,
-    src: String,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
+    pub src: String,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    parent: *mut TypeEntity,
 }
 
 impl Iframe {
@@ -85,48 +98,46 @@ impl Iframe {
             class: String::new(),
             hidden: false,
             id: String::new(),
+            ordinal: Ordinal::None,
             src: String::new(),
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::SRC(a) => self.set_src(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::SRC(a) => self.src = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(IFRAME);
 
-    subset!();
+    zero!();
 
-    text!();
-
-    class_id!();
-
-    hidden!();
-
-    src!();
-
-    tip!();
-
-    range_background!();
+    set_parent!();
 
     pub fn draw(&mut self, canvas: &Canvas) {
-        if self.range.is_empty() {
+        if self.hidden {
             return;
         }
-        let mut paint = Paint::default();
-        paint.set_color(self.background);
-        canvas.draw_irect(self.range.to_irect(), &paint);
+
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.background.as_mut().act(&r, canvas);
+        self.subset.draw(canvas);
     }
 }
