@@ -1,82 +1,130 @@
-use crate::markup::{Attribute, TypeEntity, HEAD, TITLE};
-use std::collections::VecDeque;
+use crate::markup::{Attribute, TypeEntity, AHT, HEAD, TITLE};
+use crate::parts::Subset;
 
 ///"Head" represents head.
 #[derive(Debug)]
 pub struct Head {
-    subset: VecDeque<TypeEntity>,
-    text: String,
-    id: String,
-    class: String,
-    lang: String,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub id: String,
+    pub lang: String,
 }
 
 impl Head {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Head {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
+            id: String::new(),
             lang: String::new(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::CLASS(a) => self.set_class(a),
-
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::LANG(a) => self.lang = a,
             _ => {}
         }
     }
 
     element!(HEAD);
-
-    subset!();
-
-    text!();
-
-    id_class!();
 }
 
 ///"Title" represents title.
 #[derive(Debug)]
 pub struct Title {
-    subset: VecDeque<TypeEntity>,
-    text: String,
-    id: String,
-    class: String,
-    tip: String,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub id: String,
+    pub tip: String,
 }
 
 impl Title {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Title {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
+            id: String::new(),
             tip: String::new(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::CLASS(a) => self.set_class(a),
-
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::ID(a) => self.id = a,
             _ => {}
         }
     }
 
     element!(TITLE);
+}
 
-    subset!();
+///"Aht" represents root.
+#[derive(Debug)]
+pub struct Aht {
+    pub(crate) subset: Subset,
+    pub(crate) class: String,
+    pub(crate) id: String,
+}
 
-    text!();
+impl Aht {
+    pub(crate) fn new() -> Self {
+        Aht {
+            subset: Subset::new(),
+            class: String::new(),
+            id: String::new(),
+        }
+    }
 
-    id_class!();
+    pub(crate) fn attr(&mut self, attr: Attribute) {
+        match attr {
+            _ => {}
+        }
+    }
 
-    tip!();
+    element!(AHT);
+
+    pub(crate) fn take(
+        self,
+    ) -> (
+        Option<TypeEntity>,
+        Option<TypeEntity>,
+        Option<TypeEntity>,
+        Option<TypeEntity>,
+    ) {
+        let mut t = (None, None, None, None);
+        for (i, o) in self.subset.vec.into_iter().enumerate() {
+            match &o {
+                TypeEntity::HEAD(_) => {
+                    if i == 0 {
+                        t.0 = Some(o)
+                    }
+                }
+                TypeEntity::BODY(_) => {
+                    if i == 1 {
+                        t.1 = Some(o);
+                    }
+                }
+                TypeEntity::CSS(_) => {
+                    if i == 2 {
+                        t.2 = Some(o);
+                    }
+                }
+                TypeEntity::SCRIPT(_) => {
+                    if i == 3 {
+                        t.3 = Some(o);
+                    }
+                }
+                _ => {}
+            }
+        }
+        t
+    }
 }
