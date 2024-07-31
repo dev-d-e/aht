@@ -1,7 +1,7 @@
 mod x;
 
 use self::x::{Context, XParser};
-use super::{Attribute, Mark, ValidElement};
+use super::{Attribute, Mark, TypeEntity, ValidElement};
 use crate::utils::ascii::*;
 use std::collections::{HashMap, VecDeque};
 
@@ -185,9 +185,12 @@ impl XParser for Builder {
     }
 }
 
-pub(super) fn accept(buf: &str) -> Option<ValidElement> {
+pub(super) fn accept(buf: &str) -> VecDeque<TypeEntity> {
     let mut parser = Builder::new();
     let mut context = Context::new(&mut parser);
     x::accept(&mut context, &buf);
-    parser.rst.subset.pop_front()?.to_valid()
+    let v = parser.rst.subset.drain(..);
+    v.filter_map(|o| o.to_valid())
+        .map(|o| TypeEntity::from(o))
+        .collect()
 }
