@@ -1,20 +1,25 @@
-use crate::markup::{Attribute, TypeEntity, AREA, BODY, DIALOG};
-use crate::parts::{Ordinal, Points, RectangleRange, Subset};
-use skia_safe::{Canvas, Color, Paint};
+use crate::markup::{Attribute, Page, TypeEntity, AREA, BODY};
+use crate::parts::{
+    AlignPattern, Coord, FixedRect, Ordinal, Painter, Points, Range, ScrollBar, Sides, Subset,
+};
+use skia_safe::Canvas;
 use std::fmt::Debug;
 
 ///"Body" is grid layout.
 #[derive(Debug)]
 pub struct Body {
-    subset: Subset,
-    text: String,
-    class: String,
-    column: Points,
-    id: String,
-    row: Points,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub id: String,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub grid: Grid,
+    scroll_bar: ScrollBar,
+    parent: *mut Page,
 }
 
 impl Body {
@@ -23,52 +28,50 @@ impl Body {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
-            column: Points::empty(),
             id: String::new(),
-            row: Points::empty(),
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+            zero: Coord::new(),
+            side: Sides::percentage(100, 100),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
+            grid: Grid::new(),
+            scroll_bar: ScrollBar::new(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::COLUMN(a) => self.set_column(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ROW(a) => self.set_row(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::COLUMN(a) => self.grid.column = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ROW(a) => self.grid.row = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(BODY);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!(Page);
 
-    class_id!();
-
-    column_row!();
-
-    tip!();
-
-    range_background!();
+    pub(crate) fn resize(&mut self, w: isize, h: isize) {
+        self.grid
+            .xy(self.side.width(w), self.side.height(h), &self.zero);
+        self.subset.resize(&mut self.grid);
+    }
 
     pub fn draw(&mut self, canvas: &Canvas) {
-        if self.range.is_empty() {
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
             return;
         }
-        let mut paint = Paint::default();
-        paint.set_color(self.background);
-        canvas.draw_irect(self.range.to_irect(), &paint);
 
-        set_subset_xy(&self.column, &self.row, &self.range, &mut self.subset);
-
+        self.background.as_mut().act(&r, canvas);
         self.subset.draw(canvas);
     }
 }
@@ -76,175 +79,151 @@ impl Body {
 ///"Area" is grid layout.
 #[derive(Debug)]
 pub struct Area {
-    subset: Subset,
-    text: String,
-    class: String,
-    column: Points,
-    hidden: bool,
-    id: String,
-    ordinal: Ordinal,
-    row: Points,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
     tip: String,
-    range: RectangleRange,
-    background: Color,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub grid: Grid,
+    scroll_bar: ScrollBar,
+    parent: *mut TypeEntity,
 }
 
 impl Area {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Area {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
-            column: Points::empty(),
             hidden: false,
             id: String::new(),
             ordinal: Ordinal::None,
-            row: Points::empty(),
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+            zero: Coord::new(),
+            side: Sides::percentage(100, 100),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
+            grid: Grid::new(),
+            scroll_bar: ScrollBar::new(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::COLUMN(a) => self.set_column(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::ROW(a) => self.set_row(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::COLUMN(a) => self.grid.column = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::ROW(a) => self.grid.row = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(AREA);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
-
-    column_row!();
-
-    hidden!();
-
-    ordinal!();
-
-    tip!();
-
-    range_background!();
+    pub(crate) fn resize(&mut self, t: Option<FixedRect>) {
+        if let Some(t) = t {
+            self.zero.x = t.x;
+            self.zero.y = t.y;
+            self.grid.xy(
+                self.side.width(t.width),
+                self.side.height(t.height),
+                &self.zero,
+            );
+            self.subset.resize(&mut self.grid);
+        } else {
+            self.hidden = true;
+        }
+    }
 
     pub fn draw(&mut self, canvas: &Canvas) {
-        if self.range.is_empty() {
+        if self.hidden {
             return;
         }
-        let mut paint = Paint::default();
-        paint.set_color(self.background);
-        canvas.draw_irect(self.range.to_irect(), &paint);
 
-        set_subset_xy(&self.column, &self.row, &self.range, &mut self.subset);
-
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.background.as_mut().act(&r, canvas);
         self.subset.draw(canvas);
     }
 }
 
-///"Dialog" is grid layout.
+///Grid.
 #[derive(Debug)]
-pub struct Dialog {
-    subset: Subset,
-    text: String,
-    class: String,
-    column: Points,
-    hidden: bool,
-    id: String,
-    row: Points,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
+pub struct Grid {
+    pub column: Points,
+    pub row: Points,
+    x: Vec<(isize, isize)>,
+    x_n: usize,
+    y: Vec<(isize, isize)>,
+    y_n: usize,
 }
 
-impl Dialog {
-    pub fn new() -> Self {
-        Dialog {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            column: Points::empty(),
-            hidden: false,
-            id: String::new(),
-            row: Points::empty(),
-            tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
+impl Grid {
+    fn new() -> Self {
+        Grid {
+            column: Points::new(),
+            row: Points::new(),
+            x: Vec::new(),
+            x_n: 0,
+            y: Vec::new(),
+            y_n: 0,
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::COLUMN(a) => self.set_column(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ROW(a) => self.set_row(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
-            _ => {}
+    pub(crate) fn xy(&mut self, width: isize, height: isize, zero: &Coord) {
+        self.x = self.column.coord(width, zero.x);
+        self.y = self.row.coord(height, zero.y);
+    }
+
+    pub(crate) fn next(&mut self, ordinal: &Ordinal) -> Option<FixedRect> {
+        match ordinal {
+            Ordinal::Number(i) => {
+                let n = self.x.len();
+                self.next_xy(i % n, i / n)
+            }
+            Ordinal::X(x) => self.next_xy(*x, self.y_n),
+            Ordinal::Y(y) => self.next_xy(self.x_n, *y),
+            Ordinal::XY(x, y) => self.next_xy(*x, *y),
+            Ordinal::None => self.next_xy(self.x_n, self.y_n),
         }
     }
 
-    element!(DIALOG);
-
-    subset!();
-
-    text!();
-
-    class_id!();
-
-    column_row!();
-
-    hidden!();
-
-    tip!();
-
-    range_background!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {
-        if self.range.is_empty() {
-            return;
+    fn next_xy(&mut self, x_n: usize, y_n: usize) -> Option<FixedRect> {
+        if let Some(x) = self.x.get(x_n) {
+            if let Some(y) = self.y.get(y_n) {
+                if x_n + 1 == self.x.len() {
+                    self.y_n = y_n + 1;
+                    self.x_n = 0;
+                } else {
+                    self.y_n = y_n;
+                    self.x_n = x_n + 1;
+                }
+                return Some(FixedRect {
+                    x: x.0,
+                    y: y.0,
+                    width: x.1,
+                    height: y.1,
+                });
+            }
         }
-        let mut paint = Paint::default();
-        paint.set_color(self.background);
-        canvas.draw_irect(self.range.to_irect(), &paint);
-
-        set_subset_xy(&self.column, &self.row, &self.range, &mut self.subset);
-
-        self.subset.draw(canvas);
-    }
-}
-
-//
-fn set_subset_xy(column: &Points, row: &Points, range: &RectangleRange, subset: &mut Subset) {
-    let mut subset_xy = SubsetXY::new(column.effect(range.width), row.effect(range.height));
-    let v = subset.vec();
-    for o in v {
-        match o {
-            TypeEntity::AREA(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::AUDIO(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::BUTTON(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::CANVAS(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::IMG(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::INP(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::PT(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::SELECT(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::TIME(o) => ordinal_xy!(subset_xy, o),
-            TypeEntity::VIDEO(o) => ordinal_xy!(subset_xy, o),
-            _ => {}
-        }
+        None
     }
 }
