@@ -1,39 +1,33 @@
-use crate::markup::{Attribute, TypeEntity, CSS};
-use std::collections::VecDeque;
+use crate::markup::{Attribute, CSS};
+use crate::parts::Subset;
 
 ///"Css" represents css.
 #[derive(Debug)]
 pub struct Css {
-    subset: VecDeque<TypeEntity>,
-    text: String,
-    id: String,
-    class: String,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub id: String,
 }
 
 impl Css {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Css {
-            subset: VecDeque::new(),
+            subset: Subset::new(),
             text: String::new(),
-            id: String::new(),
             class: String::new(),
+            id: String::new(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::CLASS(a) => self.set_class(a),
+            Attribute::ID(a) => self.id = a,
+            Attribute::CLASS(a) => self.class = a,
 
             _ => {}
         }
     }
 
     element!(CSS);
-
-    subset!();
-
-    text!();
-
-    id_class!();
 }
