@@ -1,34 +1,31 @@
+use super::*;
 use crate::markup::{Attribute, TypeEntity, BUTTON, FORM, INP, OPTION, PT, SELECT, TIME};
 use crate::parts::{
-    ApplyFont, HorizontalAlign, Ordinal, RectangleRange, Shape, Subset, VerticalAlign,
+    AlignPattern, ApplyFont, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset,
 };
-use skia_safe::utils::text_utils::Align;
-use skia_safe::{Canvas, Color, Paint};
+use skia_safe::Canvas;
 
 ///"Button" represents a button.
 #[derive(Debug)]
 pub struct Button {
-    subset: Subset,
-    text: String,
-    asynchronous: bool,
-    class: String,
-    disabled: bool,
-    hidden: bool,
-    href: String,
-    id: String,
-    name: String,
-    ordinal: Ordinal,
-    tip: String,
-    value: String,
-    range: RectangleRange,
-    background: Color,
-    horizontal_align: HorizontalAlign,
-    vertical_align: VerticalAlign,
-    apply_font: ApplyFont,
-    shape: Shape,
-    shape_background: Color,
-    border_width: isize,
-    border_color: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub asynchronous: bool,
+    pub class: String,
+    pub disabled: bool,
+    pub hidden: bool,
+    pub href: String,
+    pub id: String,
+    pub name: String,
+    pub ordinal: Ordinal,
+    pub tip: String,
+    pub value: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub apply_font: ApplyFont,
+    parent: *mut TypeEntity,
 }
 
 impl Button {
@@ -46,83 +43,67 @@ impl Button {
             ordinal: Ordinal::None,
             tip: String::new(),
             value: String::new(),
-            range: RectangleRange::new(),
-            background: Color::GRAY,
-            horizontal_align: HorizontalAlign::Left,
-            vertical_align: VerticalAlign::Middle,
+            zero: Coord::new(),
+            side: Sides::pixel(300, 50),
+            background: Box::new(range!(SURFACE_COLOR, 10, 10)),
+            align_pattern: AlignPattern::center_middle(),
             apply_font: ApplyFont::new(),
-            shape: Shape::Default,
-            shape_background: Color::WHITE,
-            border_width: 0,
-            border_color: Color::BLACK,
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ASYNCHRONOUS(a) => self.set_asynchronous(a),
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::DISABLED(a) => self.set_disabled(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::HREF(a) => self.set_href(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::NAME(a) => self.set_name(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::VALUE(a) => self.set_value(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::ASYNCHRONOUS(a) => self.asynchronous = a,
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::DISABLED(a) => self.disabled = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::HREF(a) => self.href = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::NAME(a) => self.name = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::VALUE(a) => self.value = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(BUTTON);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    asynchronous!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.disabled || self.hidden {
+            return;
+        }
 
-    class_id!();
-
-    disabled!();
-
-    hidden!();
-
-    href!();
-
-    name!();
-
-    ordinal!();
-
-    tip!();
-
-    value!();
-
-    range_background!();
-
-    align!();
-
-    apply_font!();
-
-    shape_background_border!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.background.as_mut().act(&r, canvas);
+        self.apply_font
+            .draw(&r, &self.align_pattern, &self.text, canvas);
+        self.subset.draw(canvas);
+    }
 }
 
 ///"Form" represents form.
 #[derive(Debug)]
 pub struct Form {
-    subset: Subset,
-    text: String,
-    action: String,
-    asynchronous: bool,
-    class: String,
-    enctype: String,
-    id: String,
-    method: String,
-    name: String,
+    pub subset: Subset,
+    pub text: String,
+    pub action: String,
+    pub asynchronous: bool,
+    pub class: String,
+    pub enctype: String,
+    pub id: String,
+    pub method: String,
+    pub name: String,
 }
 
 impl Form {
@@ -142,63 +123,44 @@ impl Form {
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::ACTION(a) => self.set_action(a),
-            Attribute::ASYNCHRONOUS(a) => self.set_asynchronous(a),
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::ENCTYPE(a) => self.set_enctype(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::METHOD(a) => self.set_method(a),
-            Attribute::NAME(a) => self.set_name(a),
+            Attribute::ACTION(a) => self.action = a,
+            Attribute::ASYNCHRONOUS(a) => self.asynchronous = a,
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::ENCTYPE(a) => self.enctype = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::METHOD(a) => self.method = a,
+            Attribute::NAME(a) => self.name = a,
             _ => {}
         }
     }
 
     element!(FORM);
-
-    subset!();
-
-    text!();
-
-    action!();
-
-    asynchronous!();
-
-    class_id!();
-
-    enctype!();
-
-    method!();
-
-    name!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
 }
 
 ///"Inp" represents input.
 #[derive(Debug)]
 pub struct Inp {
-    subset: Subset,
-    text: String,
-    class: String,
-    disabled: bool,
-    hidden: bool,
-    id: String,
-    multiple: bool,
-    name: String,
-    ordinal: Ordinal,
-    readonly: bool,
-    required: bool,
-    tip: String,
-    value: String,
-    range: RectangleRange,
-    background: Color,
-    horizontal_align: HorizontalAlign,
-    vertical_align: VerticalAlign,
-    apply_font: ApplyFont,
-    shape: Shape,
-    shape_background: Color,
-    border_width: isize,
-    border_color: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub disabled: bool,
+    pub hidden: bool,
+    pub id: String,
+    pub multiple: bool,
+    pub name: String,
+    pub ordinal: Ordinal,
+    pub readonly: bool,
+    pub required: bool,
+    pub tip: String,
+    pub value: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub apply_font: ApplyFont,
+    pub outside: Box<dyn OutPainter>,
+    scroll_bar: ScrollBar,
+    parent: *mut TypeEntity,
 }
 
 impl Inp {
@@ -217,81 +179,72 @@ impl Inp {
             required: false,
             tip: String::new(),
             value: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
-            horizontal_align: HorizontalAlign::Left,
-            vertical_align: VerticalAlign::Middle,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
-            shape: Shape::Default,
-            shape_background: Color::WHITE,
-            border_width: 0,
-            border_color: Color::WHITE,
+            outside: Box::new(Border::new()),
+            scroll_bar: ScrollBar::new(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::DISABLED(a) => self.set_disabled(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::MULTIPLE(a) => self.set_multiple(a),
-            Attribute::NAME(a) => self.set_name(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::READONLY(a) => self.set_readonly(a),
-            Attribute::REQUIRED(a) => self.set_required(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::VALUE(a) => self.set_value(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::DISABLED(a) => self.disabled = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::MULTIPLE(a) => self.multiple = a,
+            Attribute::NAME(a) => self.name = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::READONLY(a) => self.readonly = a,
+            Attribute::REQUIRED(a) => self.required = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::VALUE(a) => self.value = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(INP);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.disabled || self.hidden {
+            return;
+        }
 
-    disabled!();
-
-    hidden!();
-
-    multiple!();
-
-    name!();
-
-    ordinal!();
-
-    readonly!();
-
-    required!();
-
-    tip!();
-
-    value!();
-
-    range_background!();
-
-    align!();
-
-    apply_font!();
-
-    shape_background_border!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.outside.as_mut().act(&r, canvas);
+        self.background.as_mut().act(&r, canvas);
+        self.apply_font
+            .draw(&r, &self.align_pattern, &self.text, canvas);
+    }
 }
 
 ///"Opt" represents an option.
 #[derive(Debug)]
 pub struct Opt {
-    text: String,
-    disabled: bool,
-    selected: bool,
-    value: String,
+    pub text: String,
+    pub disabled: bool,
+    pub selected: bool,
+    pub value: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub apply_font: ApplyFont,
+    pub outside: Box<dyn OutPainter>,
+    parent: *mut TypeEntity,
 }
 
 impl Opt {
@@ -301,50 +254,66 @@ impl Opt {
             disabled: false,
             selected: false,
             value: String::new(),
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
+            apply_font: ApplyFont::new(),
+            outside: Box::new(Border::new()),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::DISABLED(a) => self.set_disabled(a),
-            Attribute::SELECTED(a) => self.set_selected(a),
-            Attribute::VALUE(a) => self.set_value(a),
+            Attribute::DISABLED(a) => self.disabled = a,
+            Attribute::SELECTED(a) => self.selected = a,
+            Attribute::VALUE(a) => self.value = a,
             _ => {}
         }
     }
 
     element!(OPTION);
 
-    text!();
+    pub(crate) fn set_parent(&mut self, parent_ptr: &mut TypeEntity) {
+        self.parent = parent_ptr;
+    }
 
-    disabled!();
+    pub(crate) fn resize(&mut self) {}
 
-    selected!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.disabled {
+            return;
+        }
 
-    value!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.outside.as_mut().act(&r, canvas);
+        self.background.as_mut().act(&r, canvas);
+        self.apply_font
+            .draw(&r, &self.align_pattern, &self.text, canvas);
+    }
 }
 
 ///"Pt" represents plain text.
 #[derive(Debug)]
 pub struct Pt {
-    subset: Subset,
-    text: String,
-    class: String,
-    hidden: bool,
-    id: String,
-    ordinal: Ordinal,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
-    horizontal_align: HorizontalAlign,
-    vertical_align: VerticalAlign,
-    apply_font: ApplyFont,
-    shape: Shape,
-    shape_background: Color,
-    border_width: isize,
-    border_color: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub hidden: bool,
+    pub id: String,
+    pub ordinal: Ordinal,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub apply_font: ApplyFont,
+    pub outside: Box<dyn OutPainter>,
+    parent: *mut TypeEntity,
 }
 
 impl Pt {
@@ -357,79 +326,73 @@ impl Pt {
             id: String::new(),
             ordinal: Ordinal::None,
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::GRAY,
-            horizontal_align: HorizontalAlign::Left,
-            vertical_align: VerticalAlign::Middle,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
-            shape: Shape::Default,
-            shape_background: Color::WHITE,
-            border_width: 0,
-            border_color: Color::BLACK,
+            outside: Box::new(Border::new()),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(PT);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.hidden {
+            return;
+        }
 
-    hidden!();
-
-    ordinal!();
-
-    tip!();
-
-    range_background!();
-
-    align!();
-
-    apply_font!();
-
-    shape_background_border!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.outside.as_mut().act(&r, canvas);
+        self.background.as_mut().act(&r, canvas);
+        self.apply_font
+            .draw(&r, &self.align_pattern, &self.text, canvas);
+    }
 }
 
 ///"Select" represents a select.
 #[derive(Debug)]
 pub struct Select {
-    subset: Subset,
-    text: String,
-    class: String,
-    disabled: bool,
-    hidden: bool,
-    id: String,
-    multiple: bool,
-    name: String,
-    ordinal: Ordinal,
-    required: bool,
-    tip: String,
-    range: RectangleRange,
-    background: Color,
-    horizontal_align: HorizontalAlign,
-    vertical_align: VerticalAlign,
-    apply_font: ApplyFont,
-    shape: Shape,
-    shape_background: Color,
-    border_width: isize,
-    border_color: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub disabled: bool,
+    pub hidden: bool,
+    pub id: String,
+    pub multiple: bool,
+    pub name: String,
+    pub ordinal: Ordinal,
+    pub required: bool,
+    pub tip: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub apply_font: ApplyFont,
+    pub outside: Box<dyn OutPainter>,
+    scroll_bar: ScrollBar,
+    parent: *mut TypeEntity,
 }
 
 impl Select {
@@ -446,92 +409,78 @@ impl Select {
             ordinal: Ordinal::None,
             required: false,
             tip: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
-            horizontal_align: HorizontalAlign::Left,
-            vertical_align: VerticalAlign::Middle,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
-            shape: Shape::Default,
-            shape_background: Color::WHITE,
-            border_width: 0,
-            border_color: Color::WHITE,
+            outside: Box::new(Border::new()),
+            scroll_bar: ScrollBar::new(),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::DISABLED(a) => self.set_disabled(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::MULTIPLE(a) => self.set_multiple(a),
-            Attribute::NAME(a) => self.set_name(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::REQUIRED(a) => self.set_required(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::DISABLED(a) => self.disabled = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::MULTIPLE(a) => self.multiple = a,
+            Attribute::NAME(a) => self.name = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::REQUIRED(a) => self.required = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(SELECT);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.disabled || self.hidden {
+            return;
+        }
 
-    disabled!();
-
-    hidden!();
-
-    multiple!();
-
-    name!();
-
-    ordinal!();
-
-    required!();
-
-    tip!();
-
-    range_background!();
-
-    align!();
-
-    apply_font!();
-
-    shape_background_border!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.outside.as_mut().act(&r, canvas);
+        self.background.as_mut().act(&r, canvas);
+        self.apply_font
+            .draw(&r, &self.align_pattern, &self.text, canvas);
+    }
 }
 
 ///"Time" represents date time.
 #[derive(Debug)]
 pub struct Time {
-    subset: Subset,
-    text: String,
-    class: String,
-    disabled: bool,
-    hidden: bool,
-    id: String,
-    name: String,
-    ordinal: Ordinal,
-    readonly: bool,
-    required: bool,
-    tip: String,
-    value: String,
-    range: RectangleRange,
-    background: Color,
-    horizontal_align: HorizontalAlign,
-    vertical_align: VerticalAlign,
-    apply_font: ApplyFont,
-    shape: Shape,
-    shape_background: Color,
-    border_width: isize,
-    border_color: Color,
+    pub subset: Subset,
+    pub text: String,
+    pub class: String,
+    pub disabled: bool,
+    pub hidden: bool,
+    pub id: String,
+    pub name: String,
+    pub ordinal: Ordinal,
+    pub readonly: bool,
+    pub required: bool,
+    pub tip: String,
+    pub value: String,
+    pub zero: Coord,
+    pub side: Sides,
+    pub background: Box<dyn Painter>,
+    pub align_pattern: AlignPattern,
+    pub apply_font: ApplyFont,
+    pub outside: Box<dyn OutPainter>,
+    parent: *mut TypeEntity,
 }
 
 impl Time {
@@ -549,67 +498,52 @@ impl Time {
             required: false,
             tip: String::new(),
             value: String::new(),
-            range: RectangleRange::new(),
-            background: Color::WHITE,
-            horizontal_align: HorizontalAlign::Left,
-            vertical_align: VerticalAlign::Middle,
+            zero: Coord::new(),
+            side: Sides::pixel(100, 50),
+            background: Box::new(Range::new()),
+            align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
-            shape: Shape::Default,
-            shape_background: Color::WHITE,
-            border_width: 0,
-            border_color: Color::WHITE,
+            outside: Box::new(Border::new()),
+            parent: std::ptr::null_mut(),
         }
     }
 
     pub fn attr(&mut self, attr: Attribute) {
         match attr {
-            Attribute::CLASS(a) => self.set_class(a),
-            Attribute::DISABLED(a) => self.set_disabled(a),
-            Attribute::HEIGHT(a) => self.set_height(a),
-            Attribute::HIDDEN(a) => self.set_hidden(a),
-            Attribute::ID(a) => self.set_id(a),
-            Attribute::NAME(a) => self.set_name(a),
-            Attribute::ORDINAL(a) => self.set_ordinal(a),
-            Attribute::READONLY(a) => self.set_readonly(a),
-            Attribute::REQUIRED(a) => self.set_required(a),
-            Attribute::TIP(a) => self.set_tip(a),
-            Attribute::VALUE(a) => self.set_value(a),
-            Attribute::WIDTH(a) => self.set_width(a),
+            Attribute::CLASS(a) => self.class = a,
+            Attribute::DISABLED(a) => self.disabled = a,
+            Attribute::HEIGHT(a) => self.side.height = a,
+            Attribute::HIDDEN(a) => self.hidden = a,
+            Attribute::ID(a) => self.id = a,
+            Attribute::NAME(a) => self.name = a,
+            Attribute::ORDINAL(a) => self.ordinal = a,
+            Attribute::READONLY(a) => self.readonly = a,
+            Attribute::REQUIRED(a) => self.required = a,
+            Attribute::TIP(a) => self.tip = a,
+            Attribute::VALUE(a) => self.value = a,
+            Attribute::WIDTH(a) => self.side.width = a,
             _ => {}
         }
     }
 
     element!(TIME);
 
-    subset!();
+    zero!();
 
-    text!();
+    set_parent!();
 
-    class_id!();
+    pub fn draw(&mut self, canvas: &Canvas) {
+        if self.disabled || self.hidden {
+            return;
+        }
 
-    disabled!();
-
-    hidden!();
-
-    name!();
-
-    ordinal!();
-
-    readonly!();
-
-    required!();
-
-    tip!();
-
-    value!();
-
-    range_background!();
-
-    align!();
-
-    apply_font!();
-
-    shape_background_border!();
-
-    pub fn draw(&mut self, canvas: &Canvas) {}
+        let r = self.side.to_rect(&self.zero);
+        if r.is_empty() {
+            return;
+        }
+        self.outside.as_mut().act(&r, canvas);
+        self.background.as_mut().act(&r, canvas);
+        self.apply_font
+            .draw(&r, &self.align_pattern, &self.text, canvas);
+    }
 }
