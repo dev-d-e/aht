@@ -92,7 +92,6 @@ impl Subset {
         let mut y = isize::MIN;
         macro_rules! size {
             ($o:ident) => {{
-                println!("zero:{:?}, {:?}", $o.zero, $o.side);
                 let n = $o.zero.x + $o.side.effective_w;
                 if x < n {
                     x = n;
@@ -204,7 +203,7 @@ impl ApplyFont {
 }
 
 ///Coord.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Coord {
     pub x: isize,
     pub y: isize,
@@ -322,6 +321,14 @@ impl Sides {
 
     pub(crate) fn percentage(w: usize, h: usize) -> Self {
         Self::new(Distance::Percentage(w), Distance::Percentage(h))
+    }
+
+    pub(crate) fn full_horizontal(n: isize) -> Self {
+        Self::new(Distance::Percentage(100), Distance::Pixel(n))
+    }
+
+    pub(crate) fn full_vertical(n: isize) -> Self {
+        Self::new(Distance::Pixel(n), Distance::Percentage(100))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -601,7 +608,7 @@ impl HorizontalScrollBar {
         HorizontalScrollBar {
             hidden: false,
             zero: Coord::new(),
-            side: Sides::percentage(100, 1),
+            side: Sides::full_horizontal(10),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::center_middle(),
             cursor_x: 0,
@@ -641,7 +648,7 @@ impl VerticalScrollBar {
         VerticalScrollBar {
             hidden: false,
             zero: Coord::new(),
-            side: Sides::percentage(1, 100),
+            side: Sides::full_vertical(10),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::center_middle(),
             cursor_y: 0,
