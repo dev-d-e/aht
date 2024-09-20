@@ -26,7 +26,7 @@ pub(super) struct Context<'a> {
 
 impl<'a> Context<'a> {
     pub(super) fn new<T: XParser>(parser: &'a mut T) -> Self {
-        Context {
+        Self {
             current_function: tag_0,
             next_function: tag_0,
             c: 0 as char,
@@ -192,7 +192,7 @@ fn attribute_3(context: &mut Context) {
         context.attribute();
         context.current_function = series_space;
         context.next_function = attribute_0;
-    } else if c == QUOTATION {
+    } else if is_quotation(c) {
         context.current_function = tag_attribute_4;
     } else {
         context.temporary_attr.1.push(c);
@@ -201,7 +201,7 @@ fn attribute_3(context: &mut Context) {
 
 fn tag_attribute_4(context: &mut Context) {
     let c = context.c;
-    if c == QUOTATION {
+    if is_quotation(c) {
         context.attribute();
         context.current_function = series_space;
         context.next_function = attribute_0;
