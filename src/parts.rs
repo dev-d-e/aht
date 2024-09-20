@@ -1,10 +1,10 @@
 use crate::grid::Grid;
-use crate::markup::TypeEntity;
+use crate::markup::{Page, TypeEntity};
 use crate::utils::ascii::*;
 use crate::utils::color::*;
-use crate::utils::{get_font, to_isize, to_usize};
+use crate::utils::{between, get_font, to_isize, to_usize};
 use skia_safe::utils::text_utils::Align;
-use skia_safe::{Canvas, Color, Font, IRect, Paint, RRect, Rect};
+use skia_safe::{scalar, Canvas, Color, Font, IRect, ISize, Paint, Point, RRect, Rect};
 use std::cell::OnceCell;
 use std::collections::VecDeque;
 
@@ -20,7 +20,7 @@ pub struct Subset {
 
 impl Subset {
     pub(crate) fn new() -> Self {
-        Subset {
+        Self {
             vec: VecDeque::new(),
         }
     }
@@ -57,10 +57,8 @@ impl Subset {
         macro_rules! resize {
             ($o:ident) => {
                 if let Some(t) = xy.next(&$o.ordinal) {
-                    $o.zero.x = t.x;
-                    $o.zero.y = t.y;
-                    $o.side.width(t.width);
-                    $o.side.height(t.height);
+                    $o.zero.from_2d(&t.pos);
+                    $o.side.value_with(&t.side);
                 } else {
                     $o.hidden = true;
                 }
@@ -87,29 +85,44 @@ impl Subset {
         }
     }
 
-    pub(crate) fn size(&self) -> (isize, isize) {
+    pub(crate) fn right_bottom(&self) -> Coord2D {
         let mut x = isize::MIN;
         let mut y = isize::MIN;
         macro_rules! size {
             ($o:ident) => {{
-                let n = $o.zero.x + $o.side.effective_w;
-                if x < n {
-                    x = n;
-                }
-                let n = $o.zero.y + $o.side.effective_h;
-                if y < n {
-                    y = n;
+                if !$o.hidden {
+                    let n = $o.zero.x + $o.side.effect.width;
+                    if x < n {
+                        x = n;
+                    }
+                    let n = $o.zero.y + $o.side.effect.height;
+                    if y < n {
+                        y = n;
+                    }
                 }
             }};
         }
         macro_rules! size1 {
             ($o:ident) => {{
-                let (m, n) = $o.outside.final_position();
-                if x < m {
-                    x = m;
+                if !$o.hidden {
+                    let f = $o.outside.final_position();
+                    if x < f.x {
+                        x = f.x;
+                    }
+                    if y < f.y {
+                        y = f.y;
+                    }
                 }
-                if y < n {
-                    y = n;
+            }};
+        }
+        macro_rules! size2 {
+            ($o:ident) => {{
+                let f = $o.outside.final_position();
+                if x < f.x {
+                    x = f.x;
+                }
+                if y < f.y {
+                    y = f.y;
                 }
             }};
         }
@@ -124,7 +137,7 @@ impl Subset {
                 TypeEntity::IFRAME(o) => size!(o),
                 TypeEntity::IMG(o) => size1!(o),
                 TypeEntity::INP(o) => size1!(o),
-                TypeEntity::OPTION(o) => size!(o),
+                TypeEntity::OPTION(o) => size2!(o),
                 TypeEntity::PT(o) => size1!(o),
                 TypeEntity::SELECT(o) => size1!(o),
                 TypeEntity::TIME(o) => size1!(o),
@@ -132,25 +145,25 @@ impl Subset {
                 _ => {}
             }
         }
-        (x, y)
+        Coord2D::xy(x, y)
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas) {
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         let subset = &mut self.vec;
         for e in subset {
             match e {
-                TypeEntity::AREA(o) => o.draw(canvas),
-                TypeEntity::AUDIO(o) => o.draw(canvas),
-                TypeEntity::BUTTON(o) => o.draw(canvas),
-                TypeEntity::CANVAS(o) => o.draw(canvas),
-                TypeEntity::IFRAME(o) => o.draw(canvas),
-                TypeEntity::IMG(o) => o.draw(canvas),
-                TypeEntity::INP(o) => o.draw(canvas),
-                TypeEntity::OPTION(o) => o.draw(canvas),
-                TypeEntity::PT(o) => o.draw(canvas),
-                TypeEntity::SELECT(o) => o.draw(canvas),
-                TypeEntity::TIME(o) => o.draw(canvas),
-                TypeEntity::VIDEO(o) => o.draw(canvas),
+                TypeEntity::AREA(o) => o.draw(canvas, page),
+                TypeEntity::AUDIO(o) => o.draw(canvas, page),
+                TypeEntity::BUTTON(o) => o.draw(canvas, page),
+                TypeEntity::CANVAS(o) => o.draw(canvas, page),
+                TypeEntity::IFRAME(o) => o.draw(canvas, page),
+                TypeEntity::IMG(o) => o.draw(canvas, page),
+                TypeEntity::INP(o) => o.draw(canvas, page),
+                TypeEntity::OPTION(o) => o.draw(canvas, page),
+                TypeEntity::PT(o) => o.draw(canvas, page),
+                TypeEntity::SELECT(o) => o.draw(canvas, page),
+                TypeEntity::TIME(o) => o.draw(canvas, page),
+                TypeEntity::VIDEO(o) => o.draw(canvas, page),
                 _ => {}
             }
         }
@@ -167,7 +180,7 @@ pub struct ApplyFont {
 
 impl ApplyFont {
     pub(crate) fn new() -> Self {
-        ApplyFont {
+        Self {
             name: String::new(),
             cell: OnceCell::new(),
             color: FONT_COLOR,
@@ -194,16 +207,16 @@ impl ApplyFont {
         canvas: &Canvas,
     ) {
         let font = self.font();
-        let t = align_pattern.font_xy(rect, font.size() as isize);
+        let (c, a) = align_pattern.font_xy(rect, font.size() as isize);
         let mut paint = Paint::default();
         paint.set_color(self.color);
         paint.set_anti_alias(true);
-        canvas.draw_str_align(text, (t.0 as i32, t.1 as i32), font, &paint, t.2);
+        canvas.draw_str_align(text, c, font, &paint, a);
     }
 }
 
-///Coord.
-#[derive(Clone, Debug)]
+///three-dimensional coordinate.
+#[derive(Debug, Default)]
 pub struct Coord {
     pub x: isize,
     pub y: isize,
@@ -212,48 +225,241 @@ pub struct Coord {
 
 impl Coord {
     pub(crate) fn new() -> Self {
-        Coord { x: 0, y: 0, z: 0 }
+        Self { x: 0, y: 0, z: 0 }
+    }
+
+    pub(crate) fn xyz(x: isize, y: isize, z: isize) -> Self {
+        Self { x, y, z }
+    }
+
+    pub(crate) fn xy(x: isize, y: isize) -> Self {
+        Self { x, y, z: 0 }
+    }
+
+    pub(crate) fn from_2d(&mut self, c: &Coord2D) {
+        self.x = c.x;
+        self.y = c.y
+    }
+
+    pub(crate) fn to_2d(&self) -> Coord2D {
+        Coord2D {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
+///two-dimensional coordinate.
+#[derive(Clone, Debug, Default)]
+pub struct Coord2D {
+    pub x: isize,
+    pub y: isize,
+}
+
+impl Coord2D {
+    pub(crate) fn new() -> Self {
+        Self { x: 0, y: 0 }
+    }
+
+    pub(crate) fn xy(x: isize, y: isize) -> Self {
+        Self { x, y }
+    }
+
+    pub fn move_xy(&self, dx: isize, dy: isize) -> Self {
+        Self {
+            x: self.x + dx,
+            y: self.y + dy,
+        }
+    }
+
+    pub(crate) fn from_xy(&mut self, c: &Self) {
+        self.x = c.x;
+        self.y = c.y;
+    }
+
+    pub(crate) fn away_from(&self, c: &Self) -> RectSide {
+        RectSide::new(self.x - c.x, self.y - c.y)
+    }
+}
+
+impl Into<ISize> for Coord2D {
+    fn into(self) -> ISize {
+        ISize::new(self.x as i32, self.y as i32)
+    }
+}
+
+impl Into<Point> for Coord2D {
+    fn into(self) -> Point {
+        Point::new(self.x as scalar, self.y as scalar)
+    }
+}
+
+///RectSide.
+#[derive(Clone, Debug)]
+pub struct RectSide {
+    pub width: isize,
+    pub height: isize,
+}
+
+impl RectSide {
+    pub(crate) fn new(width: isize, height: isize) -> Self {
+        Self { width, height }
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self::new(0, 0)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    pub(crate) fn width_add(&mut self, n: isize) {
+        self.width += n;
+    }
+
+    pub(crate) fn height_add(&mut self, n: isize) {
+        self.height += n;
+    }
+
+    pub(crate) fn width_sub(&self, r: &Self) -> isize {
+        self.width - r.width
+    }
+
+    pub(crate) fn height_sub(&self, r: &Self) -> isize {
+        self.height - r.height
+    }
+
+    pub(crate) fn add(&self, w: isize, h: isize) -> Self {
+        Self {
+            width: self.width + w,
+            height: self.height + h,
+        }
+    }
+
+    pub(crate) fn same_ratio(&self, r: &Self, r2: &Self) -> Self {
+        Self {
+            width: self.width * r.width / r2.width,
+            height: self.height * r.height / r2.height,
+        }
     }
 }
 
 ///FixedRect.
 #[derive(Debug)]
 pub struct FixedRect {
-    pub x: isize,
-    pub y: isize,
-    pub width: isize,
-    pub height: isize,
+    pub pos: Coord2D,
+    pub side: RectSide,
 }
 
 impl FixedRect {
-    pub fn is_empty(&self) -> bool {
-        self.width == 0 || self.height == 0
+    pub(crate) fn new() -> Self {
+        Self {
+            pos: Coord2D::new(),
+            side: RectSide::empty(),
+        }
     }
 
-    pub fn add(&self, left: isize, top: isize, right: isize, bottom: isize) -> Self {
-        FixedRect {
-            x: self.x - left,
-            y: self.y - top,
-            width: self.width + left + right,
-            height: self.height + top + bottom,
+    pub(crate) fn with_side(width: isize, height: isize) -> Self {
+        Self {
+            pos: Coord2D::new(),
+            side: RectSide::new(width, height),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.side.is_empty()
+    }
+
+    pub(crate) fn add(&self, left: isize, top: isize, right: isize, bottom: isize) -> Self {
+        Self {
+            pos: Coord2D::xy(self.pos.x - left, self.pos.y - top),
+            side: self.side.add(left + right, top + bottom),
+        }
+    }
+
+    pub fn move_xy(&self, dx: isize, dy: isize) -> Self {
+        Self {
+            pos: self.pos.move_xy(dx, dy),
+            side: self.side.clone(),
+        }
+    }
+
+    pub(crate) fn horizontal_move(&self, n: &LineSegment) -> Self {
+        Self {
+            pos: self.pos.move_xy(n.begin, 0),
+            side: RectSide {
+                width: n.length,
+                height: self.side.height,
+            },
+        }
+    }
+
+    pub(crate) fn vertical_move(&mut self, n: &LineSegment) -> Self {
+        Self {
+            pos: self.pos.move_xy(0, n.begin),
+            side: RectSide {
+                width: self.side.width,
+                height: n.length,
+            },
+        }
+    }
+
+    fn right(&self) -> isize {
+        self.pos.x + self.side.width
+    }
+
+    fn bottom(&self) -> isize {
+        self.pos.y + self.side.height
+    }
+
+    pub fn right_bottom(&self) -> Coord2D {
+        Coord2D::xy(self.right(), self.bottom())
+    }
+
+    pub fn within(&self, c: &Coord2D) -> bool {
+        between(c.x, self.pos.x, self.right()) && between(c.y, self.pos.y, self.bottom())
+    }
+
+    pub(crate) fn width_sub(&self, r: &Self) -> isize {
+        self.side.width_sub(&r.side)
+    }
+
+    pub(crate) fn height_sub(&self, r: &Self) -> isize {
+        self.side.height_sub(&r.side)
+    }
+
+    pub(crate) fn from_xy(&mut self, t: &Self) {
+        self.pos.from_xy(&t.pos);
+    }
+
+    pub(crate) fn horizontal_inset(&mut self, t: &Self, dy: isize) {
+        self.pos.x = t.pos.x;
+        self.pos.y = t.pos.y + dy;
+        self.side.width = t.side.width
+    }
+
+    pub(crate) fn vertical_inset(&mut self, t: &Self, dx: isize) {
+        self.pos.x = t.pos.x + dx;
+        self.pos.y = t.pos.y;
+        self.side.height = t.side.height
     }
 
     pub fn to_irect(&self) -> IRect {
         IRect::from_xywh(
-            self.x as i32,
-            self.y as i32,
-            self.width as i32,
-            self.height as i32,
+            self.pos.x as i32,
+            self.pos.y as i32,
+            self.side.width as i32,
+            self.side.height as i32,
         )
     }
 
     pub fn to_rect(&self) -> Rect {
         Rect::from_xywh(
-            self.x as f32,
-            self.y as f32,
-            self.width as f32,
-            self.height as f32,
+            self.pos.x as f32,
+            self.pos.y as f32,
+            self.side.width as f32,
+            self.side.height as f32,
         )
     }
 }
@@ -276,22 +482,22 @@ impl Distance {
 
     pub fn pixel(&self) -> Option<isize> {
         match self {
-            Distance::Pixel(i) => Some(*i),
-            Distance::Percentage(_) => None,
+            Self::Pixel(i) => Some(*i),
+            Self::Percentage(_) => None,
         }
     }
 
     pub fn get(&self, n: isize) -> isize {
         match self {
-            Distance::Pixel(i) => *i,
-            Distance::Percentage(i) => n * ((*i) as isize) / 100,
+            Self::Pixel(i) => *i,
+            Self::Percentage(i) => n * ((*i) as isize) / 100,
         }
     }
 
     pub fn is_empty(&self) -> bool {
         match self {
-            Distance::Pixel(i) => *i == 0,
-            Distance::Percentage(i) => *i == 0,
+            Self::Pixel(i) => *i == 0,
+            Self::Percentage(i) => *i == 0,
         }
     }
 }
@@ -301,17 +507,15 @@ impl Distance {
 pub struct Sides {
     pub width: Distance,
     pub height: Distance,
-    pub(crate) effective_w: isize,
-    pub(crate) effective_h: isize,
+    pub(crate) effect: RectSide,
 }
 
 impl Sides {
     pub(crate) fn new(width: Distance, height: Distance) -> Self {
-        Sides {
+        Self {
             width,
             height,
-            effective_w: 0,
-            effective_h: 0,
+            effect: RectSide::empty(),
         }
     }
 
@@ -335,36 +539,26 @@ impl Sides {
         self.width.is_empty() || self.height.is_empty()
     }
 
-    pub(crate) fn width_pixel(&self) -> Option<isize> {
-        self.width.pixel()
+    pub(crate) fn value(&mut self, w: isize, h: isize) -> &RectSide {
+        self.effect.width = self.width.get(w);
+        self.effect.height = self.height.get(h);
+        &self.effect
     }
 
-    pub(crate) fn width(&mut self, n: isize) -> isize {
-        self.effective_w = self.width.get(n);
-        self.effective_w
-    }
-
-    pub(crate) fn height_pixel(&self) -> Option<isize> {
-        self.height.pixel()
-    }
-
-    pub(crate) fn height(&mut self, n: isize) -> isize {
-        self.effective_h = self.height.get(n);
-        self.effective_h
+    pub(crate) fn value_with(&mut self, r: &RectSide) -> &RectSide {
+        self.value(r.width, r.height)
     }
 
     pub(crate) fn to_rect(&mut self, zero: &Coord) -> FixedRect {
-        if self.effective_w == 0 {
-            self.width(0);
+        if self.effect.width == 0 {
+            self.effect.width = self.width.get(0);
         }
-        if self.effective_h == 0 {
-            self.height(0);
+        if self.effect.height == 0 {
+            self.effect.height = self.height.get(0);
         }
         FixedRect {
-            x: zero.x,
-            y: zero.y,
-            width: self.effective_w,
-            height: self.effective_h,
+            pos: zero.to_2d(),
+            side: self.effect.clone(),
         }
     }
 }
@@ -394,7 +588,7 @@ pub struct AlignPattern {
 
 impl AlignPattern {
     pub(crate) fn new(horizontal: HorizontalAlign, vertical: VerticalAlign) -> Self {
-        AlignPattern {
+        Self {
             horizontal,
             vertical,
         }
@@ -408,34 +602,34 @@ impl AlignPattern {
         Self::new(HorizontalAlign::Left, VerticalAlign::Middle)
     }
 
-    pub fn font_xy(&self, rect: &FixedRect, size: isize) -> (isize, isize, Align) {
-        let mut x = rect.x;
+    pub fn font_xy(&self, rect: &FixedRect, size: isize) -> (Coord2D, Align) {
+        let mut x = rect.pos.x;
         let mut font_align = Align::Left;
         match self.horizontal {
             HorizontalAlign::Left => {}
             HorizontalAlign::Center => {
                 font_align = Align::Center;
-                x = x + rect.width / 2;
+                x = x + rect.side.width / 2;
             }
             HorizontalAlign::Right => {
                 font_align = Align::Right;
-                x = x + rect.width;
+                x = x + rect.side.width;
             }
         }
 
-        let mut y = rect.y;
+        let mut y = rect.pos.y;
         match self.vertical {
             VerticalAlign::Top => {
                 y += size;
             }
             VerticalAlign::Middle => {
-                y += rect.height / 2 + size / 2;
+                y += rect.side.height / 2 + size / 2;
             }
             VerticalAlign::Bottom => {
-                y += rect.height;
+                y += rect.side.height;
             }
         }
-        (x, y, font_align)
+        (Coord2D::xy(x, y), font_align)
     }
 }
 
@@ -448,11 +642,15 @@ pub(crate) struct Range {
 
 impl Range {
     pub(crate) fn new() -> Self {
-        Range {
+        Self {
             color: BG_COLOR,
             x_rad: 0,
             y_rad: 0,
         }
+    }
+
+    pub(crate) fn to_rrect(&self, rect: &FixedRect) -> RRect {
+        RRect::new_rect_xy(rect.to_rect(), self.x_rad as scalar, self.y_rad as scalar)
     }
 }
 
@@ -461,8 +659,7 @@ impl Painter for Range {
         let mut paint = Paint::default();
         paint.set_color(self.color);
         paint.set_anti_alias(true);
-        let r = RRect::new_rect_xy(rect.to_rect(), self.x_rad as f32, self.y_rad as f32);
-        canvas.draw_rrect(r, &paint);
+        canvas.draw_rrect(self.to_rrect(rect), &paint);
     }
 }
 
@@ -480,7 +677,7 @@ impl Ordinal {
     pub fn from_str(s: &str) -> Self {
         let s = s.trim();
         if s.is_empty() {
-            return Ordinal::None;
+            return Self::None;
         }
         if let Some(s) = s.split_once(COMMA) {
             match to_usize(s.0) {
@@ -511,7 +708,7 @@ pub struct Points {
 
 impl Points {
     pub(crate) fn new() -> Self {
-        Points {
+        Self {
             data: Vec::new(),
             count: 0,
         }
@@ -544,7 +741,7 @@ impl Points {
         Self { data, count }
     }
 
-    pub(crate) fn effect(&self, sum: isize) -> Vec<(isize, isize)> {
+    fn effect(&self, sum: isize) -> Vec<LineSegment> {
         let mut v = Vec::new();
         let mut o = 0;
         for i in &self.data {
@@ -574,100 +771,246 @@ impl Points {
         let mut k = sum;
         for i in v {
             if i < k {
-                r.push((i, k - i));
+                r.push(LineSegment::new(i, k - i));
                 k = i;
             } else {
-                r.push((i, 0));
+                r.push(LineSegment::new(i, 0));
             }
         }
         r.reverse();
         r
     }
 
-    pub(crate) fn coord(&self, sum: isize, zero: isize) -> Vec<(isize, isize)> {
+    pub(crate) fn coord(&self, sum: isize, zero: isize) -> Vec<LineSegment> {
         let mut v = self.effect(sum);
-        v.iter_mut().for_each(|i| i.0 += zero);
+        v.iter_mut().for_each(|i| i.move_seg(zero));
         v
     }
 }
 
-///"HorizontalScrollBar" is horizontal scroll bar
+///LineSegment.
 #[derive(Debug)]
-pub(crate) struct HorizontalScrollBar {
-    pub(crate) hidden: bool,
-    pub(crate) zero: Coord,
-    pub(crate) side: Sides,
-    pub(crate) background: Box<dyn Painter>,
-    pub(crate) align_pattern: AlignPattern,
-    pub(crate) cursor_x: isize,
-    pub(crate) cursor_width: isize,
+pub(crate) struct LineSegment {
+    pub begin: isize,
+    pub length: isize,
 }
 
-impl HorizontalScrollBar {
-    pub(crate) fn new() -> Self {
-        HorizontalScrollBar {
-            hidden: false,
-            zero: Coord::new(),
-            side: Sides::full_horizontal(10),
-            background: Box::new(Range::new()),
-            align_pattern: AlignPattern::center_middle(),
-            cursor_x: 0,
-            cursor_width: 0,
+impl LineSegment {
+    pub(crate) fn new(begin: isize, length: isize) -> Self {
+        Self { begin, length }
+    }
+
+    pub(crate) fn end(&self) -> isize {
+        self.begin + self.length
+    }
+
+    pub(crate) fn max_begin(&mut self, max: isize) {
+        if self.begin > max {
+            self.begin = max
         }
     }
 
-    zero!();
+    pub(crate) fn move_seg(&mut self, n: isize) {
+        self.begin += n;
+    }
+
+    pub(crate) fn finite_move(&mut self, n: isize, min: isize, max: isize) {
+        let p = self.begin + n;
+        if p >= min {
+            if p <= max {
+                self.begin = p;
+            } else {
+                self.begin = max;
+            }
+        } else {
+            self.begin = min;
+        }
+    }
+}
+
+///ScrollBarType.
+#[derive(Debug)]
+pub enum ScrollBarType {
+    Both,
+    Horizontal,
+    Vertical,
+}
+
+///"ScrollBar" include horizontal scroll bar & vertical scroll bar.
+#[derive(Debug)]
+pub(crate) struct ScrollBar {
+    scroll_bar_type: ScrollBarType,
+    pub(crate) background: Box<dyn Painter>,
+    pub(crate) foreground: Box<dyn Painter>,
+    hor_show: bool,
+    hor_fr: FixedRect,
+    hor_fore: LineSegment,
+    ver_show: bool,
+    ver_fr: FixedRect,
+    ver_fore: LineSegment,
+}
+
+impl ScrollBar {
+    pub(crate) fn new() -> Self {
+        Self {
+            scroll_bar_type: ScrollBarType::Both,
+            background: Box::new(range!(Color::CYAN)),
+            foreground: Box::new(range!(Color::YELLOW)),
+            hor_show: false,
+            hor_fr: FixedRect::with_side(0, 10),
+            hor_fore: LineSegment::new(0, 0),
+            ver_show: false,
+            ver_fr: FixedRect::with_side(10, 0),
+            ver_fore: LineSegment::new(0, 0),
+        }
+    }
+
+    pub(crate) fn horizontal() -> Self {
+        let mut s = Self::new();
+        s.scroll_bar_type = ScrollBarType::Horizontal;
+        s
+    }
+
+    pub(crate) fn vertical() -> Self {
+        let mut s = Self::new();
+        s.scroll_bar_type = ScrollBarType::Vertical;
+        s
+    }
+
+    pub(crate) fn cursor_move(&mut self, point: &Coord2D, displacement: &RectSide) {
+        match self.scroll_bar_type {
+            ScrollBarType::Both => {
+                if self.hor_fr.within(point) {
+                    if displacement.width == 0 {
+                        return;
+                    }
+                    let max = self.hor_fr.side.width;
+                    self.hor_fore.finite_move(displacement.width, 0, max);
+                } else if self.ver_fr.within(point) {
+                    if displacement.height == 0 {
+                        return;
+                    }
+                    let max = self.ver_fr.side.height;
+                    self.ver_fore.finite_move(displacement.height, 0, max);
+                }
+            }
+            ScrollBarType::Horizontal => {
+                if self.hor_fr.within(point) {
+                    if displacement.width == 0 {
+                        return;
+                    }
+                    let max = self.hor_fr.side.width;
+                    self.hor_fore.finite_move(displacement.width, 0, max);
+                }
+            }
+            ScrollBarType::Vertical => {
+                if self.ver_fr.within(point) {
+                    if displacement.height == 0 {
+                        return;
+                    }
+                    let max = self.ver_fr.side.height;
+                    self.ver_fore.finite_move(displacement.height, 0, max);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn resize(&mut self, r: &FixedRect, max: &RectSide) -> RectSide {
+        let vision = &r.side;
+        if vision.is_empty() {
+            return RectSide::new(0, 0);
+        }
+
+        match self.scroll_bar_type {
+            ScrollBarType::Both => {
+                if vision.height < max.height {
+                    self.ver_show = true;
+                    self.ver_fr.vertical_inset(r, r.width_sub(&self.ver_fr));
+                    self.ver_fore.length = vision.height * vision.height / max.height;
+                    let h = self.ver_fr.side.height - self.ver_fore.length;
+                    self.ver_fore.max_begin(h);
+                } else {
+                    self.ver_show = false;
+                    self.ver_fore.begin = 0;
+                }
+
+                if vision.width < max.width {
+                    self.hor_show = true;
+                    self.hor_fr.horizontal_inset(r, r.height_sub(&self.hor_fr));
+                    self.hor_fore.length = vision.width * vision.width / max.width;
+                    //deal with coincidence
+                    if self.ver_show && !self.ver_fr.is_empty() {
+                        self.hor_fr.side.width -= self.ver_fr.side.width;
+                    }
+                    let w = self.hor_fr.side.width - self.hor_fore.length;
+                    self.hor_fore.max_begin(w);
+                } else {
+                    self.hor_show = false;
+                    self.hor_fore.begin = 0;
+                }
+                RectSide::new(
+                    self.hor_fore.begin * max.width / vision.width,
+                    self.ver_fore.begin * max.height / vision.height,
+                )
+            }
+            ScrollBarType::Horizontal => {
+                if vision.width < max.width {
+                    self.hor_show = true;
+                    self.hor_fr.horizontal_inset(r, r.height_sub(&self.hor_fr));
+                    self.hor_fore.length = vision.width * vision.width / max.width;
+                    let w = self.hor_fr.side.width - self.hor_fore.length;
+                    self.hor_fore.max_begin(w);
+                } else {
+                    self.hor_show = false;
+                    self.hor_fore.begin = 0;
+                }
+                RectSide::new(self.hor_fore.begin * max.width / vision.width, 0)
+            }
+            ScrollBarType::Vertical => {
+                if vision.height < max.height {
+                    self.ver_show = true;
+                    self.ver_fr.vertical_inset(r, r.width_sub(&self.ver_fr));
+                    self.ver_fore.length = vision.height * vision.height / max.height;
+                    let h = self.ver_fr.side.height - self.ver_fore.length;
+                    self.ver_fore.max_begin(h);
+                } else {
+                    self.ver_show = false;
+                    self.ver_fore.begin = 0;
+                }
+                RectSide::new(0, self.ver_fore.begin * max.height / vision.height)
+            }
+        }
+    }
+
+    fn hor_draw(&mut self, canvas: &Canvas) {
+        if self.hor_show && !self.hor_fr.is_empty() {
+            self.background.act(&self.hor_fr, canvas);
+            let fg = self.hor_fr.horizontal_move(&self.hor_fore);
+            self.foreground.act(&fg, canvas);
+        }
+    }
+
+    fn ver_draw(&mut self, canvas: &Canvas) {
+        if self.ver_show && !self.ver_fr.is_empty() {
+            self.background.act(&self.ver_fr, canvas);
+            let fg = self.ver_fr.vertical_move(&self.ver_fore);
+            self.foreground.act(&fg, canvas);
+        }
+    }
 
     pub(crate) fn draw(&mut self, canvas: &Canvas) {
-        if self.hidden {
-            return;
+        match self.scroll_bar_type {
+            ScrollBarType::Both => {
+                self.ver_draw(canvas);
+                self.hor_draw(canvas);
+            }
+            ScrollBarType::Horizontal => {
+                self.hor_draw(canvas);
+            }
+            ScrollBarType::Vertical => {
+                self.ver_draw(canvas);
+            }
         }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
-        self.background.as_mut().act(&r, canvas);
-    }
-}
-
-///"VerticalScrollBar" is vertical scroll bar
-#[derive(Debug)]
-pub(crate) struct VerticalScrollBar {
-    pub(crate) hidden: bool,
-    pub(crate) zero: Coord,
-    pub(crate) side: Sides,
-    pub(crate) background: Box<dyn Painter>,
-    pub(crate) align_pattern: AlignPattern,
-    pub(crate) cursor_y: isize,
-    pub(crate) cursor_height: isize,
-}
-
-impl VerticalScrollBar {
-    pub(crate) fn new() -> Self {
-        VerticalScrollBar {
-            hidden: false,
-            zero: Coord::new(),
-            side: Sides::full_vertical(10),
-            background: Box::new(Range::new()),
-            align_pattern: AlignPattern::center_middle(),
-            cursor_y: 0,
-            cursor_height: 0,
-        }
-    }
-
-    zero!();
-
-    pub(crate) fn draw(&mut self, canvas: &Canvas) {
-        if self.hidden {
-            return;
-        }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
-        self.background.as_mut().act(&r, canvas);
     }
 }
 
@@ -681,15 +1024,29 @@ mod tests {
             data: vec![Distance::Pixel(100), Distance::Percentage(20)],
             count: 3,
         };
-        assert_eq!(p.effect(1000), [(100, 100), (200, 400), (600, 400)]);
+        let v = p.effect(1000);
+        assert_eq!((v[0].begin, v[0].length), (100, 100));
+        assert_eq!((v[1].begin, v[1].length), (200, 400));
+        assert_eq!((v[2].begin, v[2].length), (600, 400));
+
         let s = "[100,20%] ,3";
         let p = Points::from_str(s);
-        assert_eq!(p.effect(1000), [(100, 100), (200, 400), (600, 400)]);
+        let v = p.effect(1000);
+        assert_eq!((v[0].begin, v[0].length), (100, 100));
+        assert_eq!((v[1].begin, v[1].length), (200, 400));
+        assert_eq!((v[2].begin, v[2].length), (600, 400));
+
         let s = " [ 100 ,, ,] , 3 ,";
         let p = Points::from_str(s);
-        assert_eq!(p.effect(1000), [(100, 300), (400, 300), (700, 300)]);
+        let v = p.effect(1000);
+        assert_eq!((v[0].begin, v[0].length), (100, 300));
+        assert_eq!((v[1].begin, v[1].length), (400, 300));
+        assert_eq!((v[2].begin, v[2].length), (700, 300));
+
         let s = "2";
         let p = Points::from_str(s);
-        assert_eq!(p.effect(1000), [(0, 500), (500, 500)]);
+        let v = p.effect(1000);
+        assert_eq!((v[0].begin, v[0].length), (0, 500));
+        assert_eq!((v[1].begin, v[1].length), (500, 500));
     }
 }
