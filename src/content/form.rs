@@ -1,5 +1,5 @@
 use super::*;
-use crate::markup::{Attribute, TypeEntity, BUTTON, FORM, INP, OPTION, PT, SELECT, TIME};
+use crate::markup::{Attribute, Page, TypeEntity, BUTTON, FORM, INP, OPTION, PT, SELECT, TIME};
 use crate::parts::{
     AlignPattern, ApplyFont, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset,
 };
@@ -29,8 +29,8 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new() -> Self {
-        Button {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             asynchronous: false,
@@ -76,7 +76,7 @@ impl Button {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.disabled || self.hidden {
             return;
         }
@@ -88,7 +88,7 @@ impl Button {
         self.background.as_mut().act(&r, canvas);
         self.apply_font
             .draw(&r, &self.align_pattern, &self.text, canvas);
-        self.subset.draw(canvas);
+        self.subset.draw(canvas, page);
     }
 }
 
@@ -107,8 +107,8 @@ pub struct Form {
 }
 
 impl Form {
-    pub fn new() -> Self {
-        Form {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             action: String::new(),
@@ -164,8 +164,8 @@ pub struct Inp {
 }
 
 impl Inp {
-    pub fn new() -> Self {
-        Inp {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -215,7 +215,7 @@ impl Inp {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.disabled || self.hidden {
             return;
         }
@@ -248,8 +248,8 @@ pub struct Opt {
 }
 
 impl Opt {
-    pub fn new() -> Self {
-        Opt {
+    pub(crate) fn new() -> Self {
+        Self {
             text: String::new(),
             disabled: false,
             selected: false,
@@ -281,7 +281,7 @@ impl Opt {
 
     pub(crate) fn resize(&mut self) {}
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.disabled {
             return;
         }
@@ -317,8 +317,8 @@ pub struct Pt {
 }
 
 impl Pt {
-    pub fn new() -> Self {
-        Pt {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -355,7 +355,7 @@ impl Pt {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -396,8 +396,8 @@ pub struct Select {
 }
 
 impl Select {
-    pub fn new() -> Self {
-        Select {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -443,7 +443,7 @@ impl Select {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.disabled || self.hidden {
             return;
         }
@@ -484,8 +484,8 @@ pub struct Time {
 }
 
 impl Time {
-    pub fn new() -> Self {
-        Time {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -532,7 +532,7 @@ impl Time {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.disabled || self.hidden {
             return;
         }
