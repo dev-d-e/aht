@@ -7,3 +7,11 @@ readme = "README.md"
 
 [dependencies]
 skia-safe = "*"
+time = "*"
+lightningcss = "*"
+v8 = { version = "*", optional = true }
+ffmpeg-next = { version = "*", optional = true }
+
+[features]
+default = []
+js = ["dep:v8"]
