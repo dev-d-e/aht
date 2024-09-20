@@ -1,6 +1,7 @@
-use crate::markup::{Attribute, Page, TypeEntity, AREA, BODY};
+use crate::markup::{Attribute, Page, TypeEntity, VisionActionResult, AREA, BODY};
 use crate::parts::{
-    AlignPattern, Coord, FixedRect, Ordinal, Painter, Points, Range, ScrollBar, Sides, Subset,
+    AlignPattern, Coord, Coord2D, FixedRect, LineSegment, Ordinal, Painter, Points, Range,
+    RectSide, ScrollBar, Sides, Subset,
 };
 use skia_safe::Canvas;
 use std::fmt::Debug;
@@ -19,12 +20,11 @@ pub struct Body {
     pub align_pattern: AlignPattern,
     pub grid: Grid,
     scroll_bar: ScrollBar,
-    parent: *mut Page,
 }
 
 impl Body {
-    pub fn new() -> Self {
-        Body {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -36,7 +36,6 @@ impl Body {
             align_pattern: AlignPattern::left_middle(),
             grid: Grid::new(),
             scroll_bar: ScrollBar::new(),
-            parent: std::ptr::null_mut(),
         }
     }
 
@@ -57,22 +56,23 @@ impl Body {
 
     zero!();
 
-    set_parent!(Page);
+    set_parent!(TypeEntity);
 
     pub(crate) fn resize(&mut self, w: isize, h: isize) {
-        self.grid
-            .xy(self.side.width(w), self.side.height(h), &self.zero);
+        self.grid.xy(self.side.value(w, h), &self.zero);
         self.subset.resize(&mut self.grid);
     }
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         let r = self.side.to_rect(&self.zero);
         if r.is_empty() {
             return;
         }
 
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        canvas.save();
+
+        subset_draw(&mut self.subset, page, &mut self.scroll_bar, &r, canvas);
     }
 }
 
@@ -93,11 +93,12 @@ pub struct Area {
     pub grid: Grid,
     scroll_bar: ScrollBar,
     parent: *mut TypeEntity,
+    vision_zero: Coord2D,
 }
 
 impl Area {
-    pub fn new() -> Self {
-        Area {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -112,6 +113,7 @@ impl Area {
             grid: Grid::new(),
             scroll_bar: ScrollBar::new(),
             parent: std::ptr::null_mut(),
+            vision_zero: Coord2D::new(),
         }
     }
 
@@ -138,20 +140,15 @@ impl Area {
 
     pub(crate) fn resize(&mut self, t: Option<FixedRect>) {
         if let Some(t) = t {
-            self.zero.x = t.x;
-            self.zero.y = t.y;
-            self.grid.xy(
-                self.side.width(t.width),
-                self.side.height(t.height),
-                &self.zero,
-            );
+            self.zero.from_2d(&t.pos);
+            self.grid.xy(self.side.value_with(&t.side), &self.zero);
             self.subset.resize(&mut self.grid);
         } else {
             self.hidden = true;
         }
     }
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -160,8 +157,11 @@ impl Area {
         if r.is_empty() {
             return;
         }
+
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        canvas.save();
+
+        subset_draw(&mut self.subset, page, &mut self.scroll_bar, &r, canvas);
     }
 }
 
@@ -170,15 +170,15 @@ impl Area {
 pub struct Grid {
     pub column: Points,
     pub row: Points,
-    x: Vec<(isize, isize)>,
+    x: Vec<LineSegment>,
     x_n: usize,
-    y: Vec<(isize, isize)>,
+    y: Vec<LineSegment>,
     y_n: usize,
 }
 
 impl Grid {
     fn new() -> Self {
-        Grid {
+        Self {
             column: Points::new(),
             row: Points::new(),
             x: Vec::new(),
@@ -188,9 +188,9 @@ impl Grid {
         }
     }
 
-    pub(crate) fn xy(&mut self, width: isize, height: isize, zero: &Coord) {
-        self.x = self.column.coord(width, zero.x);
-        self.y = self.row.coord(height, zero.y);
+    pub(crate) fn xy(&mut self, r: &RectSide, zero: &Coord) {
+        self.x = self.column.coord(r.width, zero.x);
+        self.y = self.row.coord(r.height, zero.y);
     }
 
     pub(crate) fn next(&mut self, ordinal: &Ordinal) -> Option<FixedRect> {
@@ -217,13 +217,43 @@ impl Grid {
                     self.x_n = x_n + 1;
                 }
                 return Some(FixedRect {
-                    x: x.0,
-                    y: y.0,
-                    width: x.1,
-                    height: y.1,
+                    pos: Coord2D::xy(x.begin, y.begin),
+                    side: RectSide {
+                        width: x.length,
+                        height: y.length,
+                    },
                 });
             }
         }
         None
+    }
+}
+
+fn subset_draw(
+    subset: &mut Subset,
+    page: &mut Page,
+    scroll_bar: &mut ScrollBar,
+    r: &FixedRect,
+    canvas: &Canvas,
+) {
+    if let Some(mut surface) = unsafe { canvas.surface() } {
+        let s = subset.right_bottom().away_from(&r.pos);
+
+        if let VisionActionResult::PressSweep(c, a) = page.cursor.analyse() {
+            scroll_bar.cursor_move(c, &a);
+        }
+
+        let vision_start = scroll_bar.resize(&r, &s);
+        let rr = r.move_xy(vision_start.width, vision_start.height);
+        let info = surface.image_info().with_dimensions(rr.right_bottom());
+        if let Some(mut surface2) = surface.new_surface(&info) {
+            let canvas2 = surface2.canvas();
+            subset.draw(canvas2, page);
+
+            if let Some(image2) = surface2.image_snapshot_with_bounds(rr.to_irect()) {
+                canvas.draw_image(image2, r.pos.clone(), None);
+                scroll_bar.draw(canvas);
+            }
+        }
     }
 }
