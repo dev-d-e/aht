@@ -1,11 +1,10 @@
 mod format;
 
 use crate::content::{Audio, Button, Canv, Form, Iframe, Img, Inp, Opt, Pt, Select, Time, Video};
-use crate::css::Css;
 use crate::grid::{Area, Body};
 use crate::head::{Aht, Head, Title};
-use crate::parts::{Distance, Ordinal, Points};
-use crate::script::Script;
+use crate::metadata::{Script, Style};
+use crate::parts::{Coord2D, Distance, Ordinal, Points, RectSide};
 use crate::utils::to_bool;
 use skia_safe::Canvas;
 use std::collections::VecDeque;
@@ -17,7 +16,6 @@ pub(crate) const AUDIO: &str = "audio";
 pub(crate) const BODY: &str = "body";
 pub(crate) const BUTTON: &str = "button";
 pub(crate) const CANVAS: &str = "canvas";
-pub(crate) const CSS: &str = "css";
 pub(crate) const FORM: &str = "form";
 pub(crate) const HEAD: &str = "head";
 pub(crate) const IFRAME: &str = "iframe";
@@ -27,6 +25,7 @@ pub(crate) const OPTION: &str = "option";
 pub(crate) const PT: &str = "pt";
 pub(crate) const SCRIPT: &str = "script";
 pub(crate) const SELECT: &str = "select";
+pub(crate) const STYLE: &str = "style";
 pub(crate) const TIME: &str = "time";
 pub(crate) const TITLE: &str = "title";
 pub(crate) const VIDEO: &str = "video";
@@ -40,7 +39,6 @@ pub enum Mark {
     BODY,
     BUTTON,
     CANVAS,
-    CSS,
     FORM,
     HEAD,
     IFRAME,
@@ -50,6 +48,7 @@ pub enum Mark {
     PT,
     SCRIPT,
     SELECT,
+    STYLE,
     TIME,
     TITLE,
     VIDEO,
@@ -65,7 +64,6 @@ impl Mark {
             BODY => Ok(Self::BODY),
             BUTTON => Ok(Self::BUTTON),
             CANVAS => Ok(Self::CANVAS),
-            CSS => Ok(Self::CSS),
             FORM => Ok(Self::FORM),
             HEAD => Ok(Self::HEAD),
             IFRAME => Ok(Self::IFRAME),
@@ -75,6 +73,7 @@ impl Mark {
             PT => Ok(Self::PT),
             SCRIPT => Ok(Self::SCRIPT),
             SELECT => Ok(Self::SELECT),
+            STYLE => Ok(Self::STYLE),
             TIME => Ok(Self::TIME),
             TITLE => Ok(Self::TITLE),
             VIDEO => Ok(Self::VIDEO),
@@ -84,25 +83,25 @@ impl Mark {
 
     pub fn as_str(&self) -> &str {
         match self {
-            Mark::AHT => AHT,
-            Mark::AREA => AREA,
-            Mark::AUDIO => AUDIO,
-            Mark::BODY => BODY,
-            Mark::BUTTON => BUTTON,
-            Mark::CANVAS => CANVAS,
-            Mark::CSS => CSS,
-            Mark::FORM => FORM,
-            Mark::HEAD => HEAD,
-            Mark::IFRAME => IFRAME,
-            Mark::IMG => IMG,
-            Mark::INP => INP,
-            Mark::OPTION => OPTION,
-            Mark::PT => PT,
-            Mark::SCRIPT => SCRIPT,
-            Mark::SELECT => SELECT,
-            Mark::TIME => TIME,
-            Mark::TITLE => TITLE,
-            Mark::VIDEO => VIDEO,
+            Self::AHT => AHT,
+            Self::AREA => AREA,
+            Self::AUDIO => AUDIO,
+            Self::BODY => BODY,
+            Self::BUTTON => BUTTON,
+            Self::CANVAS => CANVAS,
+            Self::FORM => FORM,
+            Self::HEAD => HEAD,
+            Self::IFRAME => IFRAME,
+            Self::IMG => IMG,
+            Self::INP => INP,
+            Self::OPTION => OPTION,
+            Self::PT => PT,
+            Self::SCRIPT => SCRIPT,
+            Self::SELECT => SELECT,
+            Self::STYLE => STYLE,
+            Self::TIME => TIME,
+            Self::TITLE => TITLE,
+            Self::VIDEO => VIDEO,
         }
     }
 }
@@ -116,7 +115,6 @@ pub enum TypeEntity {
     BODY(Body),
     BUTTON(Button),
     CANVAS(Canv),
-    CSS(Css),
     FORM(Form),
     HEAD(Head),
     IFRAME(Iframe),
@@ -126,6 +124,7 @@ pub enum TypeEntity {
     PT(Pt),
     SCRIPT(Script),
     SELECT(Select),
+    STYLE(Style),
     TIME(Time),
     TITLE(Title),
     VIDEO(Video),
@@ -142,7 +141,7 @@ impl TypeEntity {
                 attribute.drain(..).for_each(|a| o.attr(a));
                 subset
                     .drain(..)
-                    .for_each(|sub| o.subset.push_back(TypeEntity::from(sub)));
+                    .for_each(|sub| o.subset.push_back(Self::from(sub)));
                 o
             }};
         }
@@ -152,7 +151,7 @@ impl TypeEntity {
                 attribute.drain(..).for_each(|a| o.attr(a));
                 subset
                     .drain(..)
-                    .for_each(|sub| o.subset.push_back(TypeEntity::from(sub)));
+                    .for_each(|sub| o.subset.push_back(Self::from(sub)));
                 o
             }};
         }
@@ -172,7 +171,6 @@ impl TypeEntity {
             Mark::BODY => Self::BODY(to_type!(Body)),
             Mark::BUTTON => Self::BUTTON(to_type!(Button)),
             Mark::CANVAS => Self::CANVAS(to_type!(Canv)),
-            Mark::CSS => Self::CSS(to_type!(Css)),
             Mark::FORM => Self::FORM(to_type!(Form)),
             Mark::HEAD => Self::HEAD(to_type!(Head)),
             Mark::IFRAME => Self::IFRAME(to_type!(Iframe)),
@@ -182,6 +180,7 @@ impl TypeEntity {
             Mark::PT => Self::PT(to_type!(Pt)),
             Mark::SCRIPT => Self::SCRIPT(to_type!(Script)),
             Mark::SELECT => Self::SELECT(to_type!(Select)),
+            Mark::STYLE => Self::STYLE(to_type!(Style)),
             Mark::TIME => Self::TIME(to_type!(Time)),
             Mark::TITLE => Self::TITLE(to_type!(Title)),
             Mark::VIDEO => Self::VIDEO(to_type!(Video)),
@@ -196,14 +195,40 @@ impl TypeEntity {
     ///Parse to `Page`.
     pub fn to_page(self) -> Result<Page, Self> {
         if let Self::AHT(o) = self {
-            Ok(Page::new(o.take()))
+            let mut t = (None, None, None, None);
+            for (i, o) in o.subset.vec.into_iter().enumerate() {
+                match o {
+                    TypeEntity::HEAD(o) => {
+                        if i == 0 {
+                            t.0 = Some(o)
+                        }
+                    }
+                    TypeEntity::BODY(o) => {
+                        if i == 1 {
+                            t.1 = Some(o);
+                        }
+                    }
+                    TypeEntity::STYLE(o) => {
+                        if i == 2 {
+                            t.2 = Some(o);
+                        }
+                    }
+                    TypeEntity::SCRIPT(o) => {
+                        if i == 3 {
+                            t.3 = Some(o);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Page::new(t.0, t.1, t.2, t.3))
         } else {
             Err(self)
         }
     }
 
-    fn find_mark(&mut self, s: &str, v: &mut Vec<&mut TypeEntity>) {
-        let t = self as *mut TypeEntity;
+    fn find_mark(&mut self, s: &str, v: &mut Vec<&mut Self>) {
+        let t = self as *mut Self;
 
         macro_rules! find {
             ($o:ident) => {{
@@ -216,25 +241,25 @@ impl TypeEntity {
             }};
         }
         match self {
-            TypeEntity::AHT(o) => find!(o),
-            TypeEntity::AREA(o) => find!(o),
-            TypeEntity::AUDIO(o) => find!(o),
-            TypeEntity::BODY(o) => find!(o),
-            TypeEntity::BUTTON(o) => find!(o),
-            TypeEntity::CANVAS(o) => find!(o),
-            TypeEntity::CSS(o) => find!(o),
-            TypeEntity::FORM(o) => find!(o),
-            TypeEntity::HEAD(o) => find!(o),
-            TypeEntity::IFRAME(o) => find!(o),
-            TypeEntity::IMG(o) => find!(o),
-            TypeEntity::INP(o) => find!(o),
-            TypeEntity::OPTION(_) => {}
-            TypeEntity::PT(o) => find!(o),
-            TypeEntity::SCRIPT(o) => find!(o),
-            TypeEntity::SELECT(o) => find!(o),
-            TypeEntity::TIME(o) => find!(o),
-            TypeEntity::TITLE(o) => find!(o),
-            TypeEntity::VIDEO(o) => find!(o),
+            Self::AHT(o) => find!(o),
+            Self::AREA(o) => find!(o),
+            Self::AUDIO(o) => find!(o),
+            Self::BODY(o) => find!(o),
+            Self::BUTTON(o) => find!(o),
+            Self::CANVAS(o) => find!(o),
+            Self::FORM(o) => find!(o),
+            Self::HEAD(o) => find!(o),
+            Self::IFRAME(o) => find!(o),
+            Self::IMG(o) => find!(o),
+            Self::INP(o) => find!(o),
+            Self::OPTION(_) => {}
+            Self::PT(o) => find!(o),
+            Self::SCRIPT(o) => find!(o),
+            Self::SELECT(o) => find!(o),
+            Self::STYLE(o) => find!(o),
+            Self::TIME(o) => find!(o),
+            Self::TITLE(o) => find!(o),
+            Self::VIDEO(o) => find!(o),
         }
     }
 
@@ -251,25 +276,25 @@ impl TypeEntity {
             }};
         }
         match self {
-            TypeEntity::AHT(o) => find!(o),
-            TypeEntity::AREA(o) => find!(o),
-            TypeEntity::AUDIO(o) => find!(o),
-            TypeEntity::BODY(o) => find!(o),
-            TypeEntity::BUTTON(o) => find!(o),
-            TypeEntity::CANVAS(o) => find!(o),
-            TypeEntity::CSS(o) => find!(o),
-            TypeEntity::FORM(o) => find!(o),
-            TypeEntity::HEAD(o) => find!(o),
-            TypeEntity::IFRAME(o) => find!(o),
-            TypeEntity::IMG(o) => find!(o),
-            TypeEntity::INP(o) => find!(o),
-            TypeEntity::OPTION(_) => {}
-            TypeEntity::PT(o) => find!(o),
-            TypeEntity::SCRIPT(o) => find!(o),
-            TypeEntity::SELECT(o) => find!(o),
-            TypeEntity::TIME(o) => find!(o),
-            TypeEntity::TITLE(o) => find!(o),
-            TypeEntity::VIDEO(o) => find!(o),
+            Self::AHT(o) => find!(o),
+            Self::AREA(o) => find!(o),
+            Self::AUDIO(o) => find!(o),
+            Self::BODY(o) => find!(o),
+            Self::BUTTON(o) => find!(o),
+            Self::CANVAS(o) => find!(o),
+            Self::FORM(o) => find!(o),
+            Self::HEAD(o) => find!(o),
+            Self::IFRAME(o) => find!(o),
+            Self::IMG(o) => find!(o),
+            Self::INP(o) => find!(o),
+            Self::OPTION(_) => {}
+            Self::PT(o) => find!(o),
+            Self::SCRIPT(o) => find!(o),
+            Self::SELECT(o) => find!(o),
+            Self::STYLE(o) => find!(o),
+            Self::TIME(o) => find!(o),
+            Self::TITLE(o) => find!(o),
+            Self::VIDEO(o) => find!(o),
         }
     }
 
@@ -291,25 +316,25 @@ impl TypeEntity {
             }};
         }
         match self {
-            TypeEntity::AHT(o) => find!(o),
-            TypeEntity::AREA(o) => find!(o),
-            TypeEntity::AUDIO(o) => find!(o),
-            TypeEntity::BODY(o) => find!(o),
-            TypeEntity::BUTTON(o) => find!(o),
-            TypeEntity::CANVAS(o) => find!(o),
-            TypeEntity::CSS(o) => find!(o),
-            TypeEntity::FORM(o) => find!(o),
-            TypeEntity::HEAD(o) => find!(o),
-            TypeEntity::IFRAME(o) => find!(o),
-            TypeEntity::IMG(o) => find!(o),
-            TypeEntity::INP(o) => find!(o),
-            TypeEntity::OPTION(_) => None,
-            TypeEntity::PT(o) => find!(o),
-            TypeEntity::SCRIPT(o) => find!(o),
-            TypeEntity::SELECT(o) => find!(o),
-            TypeEntity::TIME(o) => find!(o),
-            TypeEntity::TITLE(o) => find!(o),
-            TypeEntity::VIDEO(o) => find!(o),
+            Self::AHT(o) => find!(o),
+            Self::AREA(o) => find!(o),
+            Self::AUDIO(o) => find!(o),
+            Self::BODY(o) => find!(o),
+            Self::BUTTON(o) => find!(o),
+            Self::CANVAS(o) => find!(o),
+            Self::FORM(o) => find!(o),
+            Self::HEAD(o) => find!(o),
+            Self::IFRAME(o) => find!(o),
+            Self::IMG(o) => find!(o),
+            Self::INP(o) => find!(o),
+            Self::OPTION(_) => None,
+            Self::PT(o) => find!(o),
+            Self::SCRIPT(o) => find!(o),
+            Self::SELECT(o) => find!(o),
+            Self::STYLE(o) => find!(o),
+            Self::TIME(o) => find!(o),
+            Self::TITLE(o) => find!(o),
+            Self::VIDEO(o) => find!(o),
         }
     }
 }
@@ -550,7 +575,7 @@ struct ValidElement {
 
 impl ValidElement {
     fn new(mark_type: Mark, text: String) -> Self {
-        ValidElement {
+        Self {
             mark_type,
             text,
             attribute: Vec::new(),
@@ -568,32 +593,34 @@ impl ValidElement {
 pub struct Page {
     head: Option<Box<TypeEntity>>,
     body: Option<Box<TypeEntity>>,
-    css: Option<Box<TypeEntity>>,
+    style: Option<Box<TypeEntity>>,
     script: Option<Box<TypeEntity>>,
+    pub(crate) cursor: VisionAction,
 }
 
 impl Page {
     fn new(
-        t: (
-            Option<TypeEntity>,
-            Option<TypeEntity>,
-            Option<TypeEntity>,
-            Option<TypeEntity>,
-        ),
+        head: Option<Head>,
+        body: Option<Body>,
+        style: Option<Style>,
+        script: Option<Script>,
     ) -> Self {
-        let mut page = Page {
-            head: t.0.map(|o| Box::new(o)),
-            body: t.1.map(|o| Box::new(o)),
-            css: t.2.map(|o| Box::new(o)),
-            script: t.3.map(|o| Box::new(o)),
+        let mut page = Self {
+            head: head.map(|o| Box::new(TypeEntity::HEAD(o))),
+            body: body.map(|o| Box::new(TypeEntity::BODY(o))),
+            style: style.map(|o| Box::new(TypeEntity::STYLE(o))),
+            script: script.map(|o| Box::new(TypeEntity::SCRIPT(o))),
+            cursor: VisionAction::new(),
         };
-        let p = &mut page as *mut Page;
+
+        let p = &mut page as *mut Self;
         if let Some(t) = &mut page.body {
             let t = t.as_mut();
             let o = t as *mut TypeEntity;
             if let TypeEntity::BODY(body) = t {
                 unsafe {
-                    body.set_parent(&mut *p, &mut *o);
+                    body.set_parent(&mut *o);
+                    page.style(|o| o.build(&mut *p));
                 }
             }
         }
@@ -601,19 +628,46 @@ impl Page {
     }
 
     ///Parse a string slice to `Page`.
-    pub fn from_str(buf: &str) -> Option<Result<Self, TypeEntity>> {
-        Some(TypeEntity::from_str(buf).pop_front()?.to_page())
+    pub fn from_str(buf: &str) -> EntityResult {
+        if let Some(e) = TypeEntity::from_str(buf).pop_front() {
+            match e.to_page() {
+                Ok(p) => EntityResult::Page(p),
+                Err(e) => EntityResult::TypeEntity(e),
+            }
+        } else {
+            EntityResult::None
+        }
     }
 
-    ///Returns true if the `Page` doesn't contain `Head` or `Body` or `Css` or `Script`.
+    ///Returns true if the `Page` doesn't contain `Head` or `Body` or `Style` or `Script`.
     pub fn incomplete(&self) -> bool {
-        self.head.is_none() || self.body.is_none() || self.css.is_none() || self.script.is_none()
+        self.head.is_none() || self.body.is_none() || self.style.is_none() || self.script.is_none()
     }
 
     fn body(&mut self, f: impl Fn(&mut Body)) -> bool {
         if let Some(t) = &mut self.body {
             if let TypeEntity::BODY(body) = t.as_mut() {
                 f(body);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn style(&mut self, f: impl Fn(&mut Style)) -> bool {
+        if let Some(t) = &mut self.style {
+            if let TypeEntity::STYLE(style) = t.as_mut() {
+                f(style);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn script(&mut self, f: impl Fn(&mut Script)) -> bool {
+        if let Some(t) = &mut self.script {
+            if let TypeEntity::SCRIPT(script) = t.as_mut() {
+                f(script);
                 return true;
             }
         }
@@ -630,7 +684,8 @@ impl Page {
 
     ///Returns true if draw.
     pub fn draw(&mut self, canvas: &Canvas) -> bool {
-        self.body(|o| o.draw(canvas))
+        let p = self as *mut Self;
+        self.body(|o| o.draw(canvas, unsafe { &mut *p }))
     }
 
     pub fn find_mark(&mut self, s: Mark) -> Vec<&mut TypeEntity> {
@@ -686,6 +741,18 @@ impl Page {
         }
         v
     }
+
+    pub fn set_cursor(&mut self, p: VisionPosition) {
+        self.cursor.add(p);
+    }
+}
+
+///EntityResult.
+#[derive(Debug)]
+pub enum EntityResult {
+    Page(Page),
+    TypeEntity(TypeEntity),
+    None,
 }
 
 enum Condition {
@@ -733,4 +800,104 @@ impl Conditions {
     pub fn id(&mut self, s: impl Into<String>) {
         self.v.push(Condition::ID(s.into()))
     }
+}
+
+///CursorAction.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CursorAction {
+    Down(usize),
+    Up,
+}
+
+///VisionPosition.
+#[derive(Debug)]
+pub struct VisionPosition {
+    pub xy: Coord2D,
+    pub action: CursorAction,
+}
+
+impl VisionPosition {
+    pub fn new(xy: Coord2D, action: CursorAction) -> Self {
+        Self { xy, action }
+    }
+
+    pub fn with_xy(x: isize, y: isize, action: CursorAction) -> Self {
+        Self::new(Coord2D::xy(x, y), action)
+    }
+
+    pub fn with_xy_up(x: isize, y: isize) -> Self {
+        Self::with_xy(x, y, CursorAction::Up)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct VisionAction {
+    a: Option<VisionPosition>,
+    b: Option<VisionPosition>,
+    f: bool,
+}
+
+impl VisionAction {
+    fn new() -> Self {
+        Self {
+            a: None,
+            b: None,
+            f: true,
+        }
+    }
+
+    fn add(&mut self, v: VisionPosition) {
+        if self.f {
+            self.b.replace(v);
+            self.f = false;
+        } else {
+            self.a.replace(v);
+            self.f = true;
+        }
+    }
+
+    fn ordered(&self) -> (&Option<VisionPosition>, &Option<VisionPosition>) {
+        if self.f {
+            (&self.a, &self.b)
+        } else {
+            (&self.b, &self.a)
+        }
+    }
+
+    pub(crate) fn analyse(&self) -> VisionActionResult {
+        let (fir, sec) = self.ordered();
+        if let Some(fir) = fir {
+            match fir.action {
+                CursorAction::Down(n) => {
+                    if let Some(sec) = sec {
+                        if fir.action == sec.action {
+                            return VisionActionResult::PressSweep(
+                                &fir.xy,
+                                fir.xy.away_from(&sec.xy),
+                            );
+                        }
+                    }
+                    return VisionActionResult::Press(&fir.xy, n);
+                }
+                CursorAction::Up => {
+                    if let Some(sec) = sec {
+                        if fir.action == sec.action {
+                            return VisionActionResult::Sweep(&fir.xy, fir.xy.away_from(&sec.xy));
+                        }
+                    }
+                    return VisionActionResult::Loosen(&fir.xy);
+                }
+            }
+        }
+        VisionActionResult::None
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum VisionActionResult<'a> {
+    Press(&'a Coord2D, usize),
+    Sweep(&'a Coord2D, RectSide),
+    PressSweep(&'a Coord2D, RectSide),
+    Loosen(&'a Coord2D),
+    None,
 }
