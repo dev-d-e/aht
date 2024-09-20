@@ -14,12 +14,13 @@
 #[macro_use]
 mod macros;
 pub mod content;
-pub mod css;
 pub mod grid;
 pub mod head;
 pub mod markup;
+pub mod metadata;
 pub mod parts;
-pub mod script;
+mod script;
+mod style;
 mod utils;
 
 #[cfg(test)]
@@ -38,8 +39,8 @@ mod tests {
             <button href=\"\" async=>button</button>
             <area class=\"\" id=\"\" width=\"1000\" height=\"100\" column=2 row=\"\"></area>
         </body>
-        <css>
-        </css>
+        <style>
+        </style>
         <script>
         </script>
      </aht>";
