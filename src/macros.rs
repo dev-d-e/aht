@@ -27,7 +27,9 @@ macro_rules! set_parent {
         set_parent!(TypeEntity, TypeEntity);
     };
     ($t:ty) => {
-        set_parent!($t, TypeEntity);
+        pub(crate) fn set_parent(&mut self, self_ptr: &mut $t) {
+            self.subset.set_parent(self_ptr);
+        }
     };
     ($t:ty, $s:ty) => {
         pub(crate) fn set_parent(&mut self, parent_ptr: &mut $t, self_ptr: &mut $s) {
