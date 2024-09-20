@@ -1,4 +1,4 @@
-use crate::markup::{Attribute, TypeEntity, AHT, HEAD, TITLE};
+use crate::markup::{Attribute, AHT, HEAD, TITLE};
 use crate::parts::Subset;
 
 ///"Head" represents head.
@@ -12,8 +12,8 @@ pub struct Head {
 }
 
 impl Head {
-    pub fn new() -> Self {
-        Head {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -45,8 +45,8 @@ pub struct Title {
 }
 
 impl Title {
-    pub fn new() -> Self {
-        Title {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -76,7 +76,7 @@ pub struct Aht {
 
 impl Aht {
     pub(crate) fn new() -> Self {
-        Aht {
+        Self {
             subset: Subset::new(),
             class: String::new(),
             id: String::new(),
@@ -90,41 +90,4 @@ impl Aht {
     }
 
     element!(AHT);
-
-    pub(crate) fn take(
-        self,
-    ) -> (
-        Option<TypeEntity>,
-        Option<TypeEntity>,
-        Option<TypeEntity>,
-        Option<TypeEntity>,
-    ) {
-        let mut t = (None, None, None, None);
-        for (i, o) in self.subset.vec.into_iter().enumerate() {
-            match &o {
-                TypeEntity::HEAD(_) => {
-                    if i == 0 {
-                        t.0 = Some(o)
-                    }
-                }
-                TypeEntity::BODY(_) => {
-                    if i == 1 {
-                        t.1 = Some(o);
-                    }
-                }
-                TypeEntity::CSS(_) => {
-                    if i == 2 {
-                        t.2 = Some(o);
-                    }
-                }
-                TypeEntity::SCRIPT(_) => {
-                    if i == 3 {
-                        t.3 = Some(o);
-                    }
-                }
-                _ => {}
-            }
-        }
-        t
-    }
 }
