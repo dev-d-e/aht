@@ -18,6 +18,8 @@ pub(crate) mod ascii {
     pub(crate) const EQUAL: char = '=';
     //'"'
     pub(crate) const QUOTATION: char = '"';
+    //'''
+    pub(crate) const S_QUOTATION: char = '\'';
     //','
     pub(crate) const COMMA: char = ',';
     //'['
@@ -81,4 +83,9 @@ pub fn get_font(s: &str) -> Option<Font> {
     } else {
         None
     }
+}
+
+#[inline]
+pub fn between<T: PartialOrd>(o: T, min: T, max: T) -> bool {
+    o >= min && o <= max
 }
