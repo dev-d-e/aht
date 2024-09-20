@@ -1,5 +1,5 @@
 use super::*;
-use crate::markup::{Attribute, TypeEntity, AUDIO, IMG, VIDEO};
+use crate::markup::{Attribute, Page, TypeEntity, AUDIO, IMG, VIDEO};
 use crate::parts::{AlignPattern, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset};
 use skia_safe::Canvas;
 
@@ -21,8 +21,8 @@ pub struct Audio {
 }
 
 impl Audio {
-    pub fn new() -> Self {
-        Audio {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -57,7 +57,7 @@ impl Audio {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -67,7 +67,7 @@ impl Audio {
             return;
         }
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        self.subset.draw(canvas, page);
     }
 }
 
@@ -92,8 +92,8 @@ pub struct Img {
 }
 
 impl Img {
-    pub fn new() -> Self {
-        Img {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -132,7 +132,7 @@ impl Img {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -143,7 +143,7 @@ impl Img {
         }
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        self.subset.draw(canvas, page);
     }
 }
 
@@ -165,8 +165,8 @@ pub struct Video {
 }
 
 impl Video {
-    pub fn new() -> Self {
-        Video {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -201,7 +201,7 @@ impl Video {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -211,6 +211,6 @@ impl Video {
             return;
         }
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        self.subset.draw(canvas, page);
     }
 }
