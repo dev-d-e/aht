@@ -10,6 +10,11 @@ fn is_crlf(c: char) -> bool {
     c == CR || c == LF
 }
 
+#[inline]
+fn is_quotation(c: char) -> bool {
+    c == QUOTATION || c == S_QUOTATION
+}
+
 #[derive(Debug)]
 struct UnclearElement {
     key: String,
@@ -20,7 +25,7 @@ struct UnclearElement {
 
 impl UnclearElement {
     fn new(key: String) -> Self {
-        UnclearElement {
+        Self {
             key,
             text: String::new(),
             attribute: HashMap::new(),
@@ -98,7 +103,7 @@ struct Builder {
 
 impl Builder {
     pub(crate) fn new() -> Self {
-        Builder {
+        Self {
             temporary: Vec::new(),
             rst: UnclearElement::empty(),
             last_one: None,
