@@ -1,4 +1,4 @@
-use crate::markup::{Attribute, TypeEntity, CANVAS, IFRAME};
+use crate::markup::{Attribute, Page, TypeEntity, CANVAS, IFRAME};
 use crate::parts::{AlignPattern, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset};
 use skia_safe::Canvas;
 
@@ -21,8 +21,8 @@ pub struct Canv {
 }
 
 impl Canv {
-    pub fn new() -> Self {
-        Canv {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -58,7 +58,7 @@ impl Canv {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -68,7 +68,7 @@ impl Canv {
             return;
         }
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        self.subset.draw(canvas, page);
     }
 }
 
@@ -91,8 +91,8 @@ pub struct Iframe {
 }
 
 impl Iframe {
-    pub fn new() -> Self {
-        Iframe {
+    pub(crate) fn new() -> Self {
+        Self {
             subset: Subset::new(),
             text: String::new(),
             class: String::new(),
@@ -128,7 +128,7 @@ impl Iframe {
 
     set_parent!();
 
-    pub fn draw(&mut self, canvas: &Canvas) {
+    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
         if self.hidden {
             return;
         }
@@ -138,6 +138,6 @@ impl Iframe {
             return;
         }
         self.background.as_mut().act(&r, canvas);
-        self.subset.draw(canvas);
+        self.subset.draw(canvas, page);
     }
 }
