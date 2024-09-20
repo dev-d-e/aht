@@ -21,8 +21,8 @@ Page::from_str(&s);
         <button href="" async="">button</button>
         <area class="" id="" width="1000" height="100" column="2" row=""></area>
     </body>
-    <css>
-    </css>
+    <style>
+    </style>
     <script>
     </script>
  </aht>
