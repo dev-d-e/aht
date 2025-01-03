@@ -1,7 +1,7 @@
 macro_rules! element {
-    ($n:ident) => {
-        pub fn element(&self) -> &str {
-            $n
+    () => {
+        pub(crate) fn element(&self) -> &Arc<RwLock<Element>> {
+            &self.element
         }
     };
 }
@@ -22,19 +22,10 @@ macro_rules! zero {
     };
 }
 
-macro_rules! set_parent {
+macro_rules! right_bottom {
     () => {
-        set_parent!(TypeEntity, TypeEntity);
-    };
-    ($t:ty) => {
-        pub(crate) fn set_parent(&mut self, self_ptr: &mut $t) {
-            self.subset.set_parent(self_ptr);
-        }
-    };
-    ($t:ty, $s:ty) => {
-        pub(crate) fn set_parent(&mut self, parent_ptr: &mut $t, self_ptr: &mut $s) {
-            self.parent = parent_ptr;
-            self.subset.set_parent(self_ptr);
+        pub(crate) fn right_bottom(&self) -> Coord2D {
+            self.outside.final_position().clone()
         }
     };
 }
