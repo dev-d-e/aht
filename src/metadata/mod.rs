@@ -1,82 +1,72 @@
-use crate::markup::{Attribute, Page, SCRIPT, STYLE};
-use crate::parts::Subset;
+use crate::markup::{Element, Page};
 use crate::script::ScriptRuntime;
 use crate::style::StyleContext;
+use std::sync::{Arc, RwLock};
 
 ///"Style" represents style.
-#[derive(Debug)]
-pub struct Style {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub id: String,
+pub(crate) struct Style {
+    element: Arc<RwLock<Element>>,
     style: StyleContext,
 }
 
+impl std::fmt::Debug for Style {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Style");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o);
+        }
+        f.finish()
+    }
+}
+
 impl Style {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            id: String::new(),
+            element,
             style: StyleContext::new(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::ID(a) => self.id = a,
-            Attribute::CLASS(a) => self.class = a,
-            _ => {}
-        }
-    }
-
-    element!(STYLE);
-
     pub fn build(&mut self, page: &mut Page) {
-        if self.text.is_empty() {
-            return;
+        if let Ok(e) = self.element.read() {
+            if e.text.is_empty() {
+                return;
+            }
+            self.style.build(&e.text, page)
         }
-        self.style.build(&self.text, page)
     }
 }
 
 ///"Script" represents script.
-#[derive(Debug)]
-pub struct Script {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub id: String,
+pub(crate) struct Script {
+    element: Arc<RwLock<Element>>,
     script_rt: ScriptRuntime,
 }
 
+impl std::fmt::Debug for Script {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Script");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o);
+        }
+        f.finish()
+    }
+}
+
 impl Script {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            id: String::new(),
+            element,
             script_rt: ScriptRuntime::new(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::ID(a) => self.id = a,
-            _ => {}
-        }
-    }
-
-    element!(SCRIPT);
-
     pub fn run(&mut self, page: &mut Page) {
-        if self.text.is_empty() {
-            return;
+        if let Ok(e) = self.element.read() {
+            if e.text.is_empty() {
+                return;
+            }
+            self.script_rt.run(&e.text, page)
         }
-        self.script_rt.run(&self.text, page)
     }
 }
