@@ -5,9 +5,9 @@ It's another hypertext format to describe GUI for native application.
 ## Usage
 
 ```
-use aht::markup::{Page, TypeEntity};
+use aht::markup::{Element, Page};
 
-TypeEntity::from_str(&s);
+Element::from_str(&s);
 Page::from_str(&s);
 ```
 
@@ -18,7 +18,7 @@ Page::from_str(&s);
     </head>
     <body column="[100,100]" row="[100,100],2">
         <inp name="" value="" readonly required>input</inp>
-        <button href="" async="">button</button>
+        <button href="">button</button>
         <area class="" id="" width="1000" height="100" column="2" row=""></area>
     </body>
     <style>
