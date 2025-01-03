@@ -1,18 +1,14 @@
 mod x;
 
 use self::x::{Context, XParser};
-use super::{Attribute, Mark, TypeEntity, ValidElement};
+use super::{AttrName, Attribute, Element, Mark};
 use crate::utils::ascii::*;
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, RwLock};
 
 #[inline]
 fn is_crlf(c: char) -> bool {
     c == CR || c == LF
-}
-
-#[inline]
-fn is_quotation(c: char) -> bool {
-    c == QUOTATION || c == S_QUOTATION
 }
 
 #[derive(Debug)]
@@ -35,31 +31,6 @@ impl UnclearElement {
 
     fn empty() -> Self {
         Self::new(String::new())
-    }
-
-    fn to_valid(self) -> Option<ValidElement> {
-        match Mark::from(self.key) {
-            Ok(k) => {
-                let mut e = ValidElement::new(k, self.text);
-                let mut attribute = self.attribute;
-                for (k, s) in attribute.drain() {
-                    match Attribute::from(&k, s) {
-                        Ok(a) => {
-                            e.attribute.push(a);
-                        }
-                        Err(_) => {}
-                    }
-                }
-                let mut subset = self.subset;
-                for o in subset.drain(..) {
-                    if let Some(t) = o.to_valid() {
-                        e.subset.push(t);
-                    }
-                }
-                Some(e)
-            }
-            Err(_) => None,
-        }
     }
 
     fn push_text(&mut self, step: usize, s: &str) {
@@ -91,6 +62,57 @@ impl UnclearElement {
         } else {
             None
         }
+    }
+
+    fn to_check(self) -> Option<CheckElement> {
+        Mark::from(&self.key).map(|k| {
+            let mut e = CheckElement::new(k, self.text);
+            for (k, s) in self.attribute.into_iter() {
+                match Attribute::from(&k, s) {
+                    Ok(a) => {
+                        e.attribute.insert(a.name(), a);
+                    }
+                    Err(_) => {}
+                }
+            }
+            for o in self.subset.into_iter() {
+                if let Some(t) = o.to_check() {
+                    e.subset.push(t);
+                }
+            }
+            e
+        })
+    }
+}
+
+#[derive(Debug)]
+struct CheckElement {
+    mark_type: Mark,
+    text: String,
+    attribute: HashMap<AttrName, Attribute>,
+    subset: Vec<CheckElement>,
+}
+
+impl CheckElement {
+    fn new(mark_type: Mark, text: String) -> Self {
+        Self {
+            mark_type,
+            text,
+            attribute: HashMap::new(),
+            subset: Vec::new(),
+        }
+    }
+
+    fn to_element(self) -> Option<Element> {
+        let mut e = Element::new(self.mark_type, self.text);
+        e.attribute.extend(self.attribute);
+        for o in self.subset.into_iter() {
+            if let Some(t) = o.to_element() {
+                e.subset.push_back(Arc::new(RwLock::new(t)));
+            }
+        }
+        e.subset_upper();
+        Some(e)
     }
 }
 
@@ -129,6 +151,13 @@ impl Builder {
             }
         }
         None
+    }
+
+    fn build(buf: &str) -> VecDeque<UnclearElement> {
+        let mut parser = Builder::new();
+        let mut context = Context::new(&mut parser);
+        x::accept(&mut context, &buf);
+        parser.rst.subset
     }
 }
 
@@ -190,12 +219,26 @@ impl XParser for Builder {
     }
 }
 
-pub(super) fn accept(buf: &str) -> VecDeque<TypeEntity> {
-    let mut parser = Builder::new();
-    let mut context = Context::new(&mut parser);
-    x::accept(&mut context, &buf);
-    let v = parser.rst.subset.drain(..);
-    v.filter_map(|o| o.to_valid())
-        .map(|o| TypeEntity::from(o))
+pub(super) fn accept(buf: &str) -> VecDeque<Element> {
+    Builder::build(buf)
+        .into_iter()
+        .filter_map(|o| o.to_check())
+        .filter_map(|o| o.to_element())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A: &str = "<a b=0 c d= '1' e='0&amp;0&lt;0&gt;0&quot;0&nbsp;0&apos;' f=\"2\">a</a>";
+    const B: &str = "<a b=0 c d= '1' e= f=\"2\">a</a>";
+    const C: &str = "<a b=0 c d= '1' e=' f=\"2\"/>";
+
+    #[test]
+    fn build() {
+        println!("{:?}", Builder::build(A));
+        println!("{:?}", Builder::build(B));
+        println!("{:?}", Builder::build(C));
+    }
 }
