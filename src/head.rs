@@ -1,93 +1,65 @@
-use crate::markup::{Attribute, AHT, HEAD, TITLE};
-use crate::parts::Subset;
+use crate::markup::Element;
+use std::sync::{Arc, RwLock};
 
 ///"Head" represents head.
-#[derive(Debug)]
-pub struct Head {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub id: String,
-    pub lang: String,
+pub(crate) struct Head {
+    element: Arc<RwLock<Element>>,
+}
+
+impl std::fmt::Debug for Head {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Head");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o);
+        }
+        f.finish()
+    }
 }
 
 impl Head {
-    pub(crate) fn new() -> Self {
-        Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            id: String::new(),
-            lang: String::new(),
-        }
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+        Self { element }
     }
-
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::LANG(a) => self.lang = a,
-            _ => {}
-        }
-    }
-
-    element!(HEAD);
 }
 
 ///"Title" represents title.
-#[derive(Debug)]
-pub struct Title {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub id: String,
-    pub tip: String,
+pub(crate) struct Title {
+    element: Arc<RwLock<Element>>,
+}
+
+impl std::fmt::Debug for Title {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Title");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o);
+        }
+        f.finish()
+    }
 }
 
 impl Title {
-    pub(crate) fn new() -> Self {
-        Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            id: String::new(),
-            tip: String::new(),
-        }
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+        Self { element }
     }
-
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::ID(a) => self.id = a,
-            _ => {}
-        }
-    }
-
-    element!(TITLE);
 }
 
 ///"Aht" represents root.
-#[derive(Debug)]
-pub struct Aht {
-    pub(crate) subset: Subset,
-    pub(crate) class: String,
-    pub(crate) id: String,
+pub(crate) struct Aht {
+    element: Arc<RwLock<Element>>,
+}
+
+impl std::fmt::Debug for Aht {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Aht");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o);
+        }
+        f.finish()
+    }
 }
 
 impl Aht {
-    pub(crate) fn new() -> Self {
-        Self {
-            subset: Subset::new(),
-            class: String::new(),
-            id: String::new(),
-        }
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+        Self { element }
     }
-
-    pub(crate) fn attr(&mut self, attr: Attribute) {
-        match attr {
-            _ => {}
-        }
-    }
-
-    element!(AHT);
 }
