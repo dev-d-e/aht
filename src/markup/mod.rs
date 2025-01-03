@@ -1,36 +1,37 @@
 mod format;
 
-use crate::content::{Audio, Button, Canv, Form, Iframe, Img, Inp, Opt, Pt, Select, Time, Video};
-use crate::grid::{Area, Body};
-use crate::head::{Aht, Head, Title};
+use crate::content::Body;
+use crate::head::Head;
 use crate::metadata::{Script, Style};
 use crate::parts::{Coord2D, Distance, Ordinal, Points, RectSide};
-use crate::utils::to_bool;
+use crate::utils::*;
 use skia_safe::Canvas;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, RwLock};
 
-pub(crate) const AHT: &str = "aht";
-pub(crate) const AREA: &str = "area";
-pub(crate) const AUDIO: &str = "audio";
-pub(crate) const BODY: &str = "body";
-pub(crate) const BUTTON: &str = "button";
-pub(crate) const CANVAS: &str = "canvas";
-pub(crate) const FORM: &str = "form";
-pub(crate) const HEAD: &str = "head";
-pub(crate) const IFRAME: &str = "iframe";
-pub(crate) const IMG: &str = "img";
-pub(crate) const INP: &str = "inp";
-pub(crate) const OPTION: &str = "option";
-pub(crate) const PT: &str = "pt";
-pub(crate) const SCRIPT: &str = "script";
-pub(crate) const SELECT: &str = "select";
-pub(crate) const STYLE: &str = "style";
-pub(crate) const TIME: &str = "time";
-pub(crate) const TITLE: &str = "title";
-pub(crate) const VIDEO: &str = "video";
+const AHT: &str = "aht";
+const AREA: &str = "area";
+const AUDIO: &str = "audio";
+const BODY: &str = "body";
+const BUTTON: &str = "button";
+const CANVAS: &str = "canvas";
+const FORM: &str = "form";
+const HEAD: &str = "head";
+const IFRAME: &str = "iframe";
+const IMG: &str = "img";
+const INP: &str = "inp";
+const OPTION: &str = "option";
+const PT: &str = "pt";
+const SCRIPT: &str = "script";
+const SELECT: &str = "select";
+const STYLE: &str = "style";
+const TIME: &str = "time";
+const TITLE: &str = "title";
+const VIDEO: &str = "video";
 
-///Mark.
+///Represents markup.
 #[derive(Debug, PartialEq)]
 pub enum Mark {
     AHT,
@@ -55,32 +56,33 @@ pub enum Mark {
 }
 
 impl Mark {
-    ///Converts a string slice to `Mark`.
-    pub fn from(s: String) -> Result<Self, String> {
-        match s.as_str() {
-            AHT => Ok(Self::AHT),
-            AREA => Ok(Self::AREA),
-            AUDIO => Ok(Self::AUDIO),
-            BODY => Ok(Self::BODY),
-            BUTTON => Ok(Self::BUTTON),
-            CANVAS => Ok(Self::CANVAS),
-            FORM => Ok(Self::FORM),
-            HEAD => Ok(Self::HEAD),
-            IFRAME => Ok(Self::IFRAME),
-            IMG => Ok(Self::IMG),
-            INP => Ok(Self::INP),
-            OPTION => Ok(Self::OPTION),
-            PT => Ok(Self::PT),
-            SCRIPT => Ok(Self::SCRIPT),
-            SELECT => Ok(Self::SELECT),
-            STYLE => Ok(Self::STYLE),
-            TIME => Ok(Self::TIME),
-            TITLE => Ok(Self::TITLE),
-            VIDEO => Ok(Self::VIDEO),
-            _ => Err(s),
+    ///Converts from a string slice.
+    pub fn from(s: &str) -> Option<Self> {
+        match s {
+            AHT => Some(Self::AHT),
+            AREA => Some(Self::AREA),
+            AUDIO => Some(Self::AUDIO),
+            BODY => Some(Self::BODY),
+            BUTTON => Some(Self::BUTTON),
+            CANVAS => Some(Self::CANVAS),
+            FORM => Some(Self::FORM),
+            HEAD => Some(Self::HEAD),
+            IFRAME => Some(Self::IFRAME),
+            IMG => Some(Self::IMG),
+            INP => Some(Self::INP),
+            OPTION => Some(Self::OPTION),
+            PT => Some(Self::PT),
+            SCRIPT => Some(Self::SCRIPT),
+            SELECT => Some(Self::SELECT),
+            STYLE => Some(Self::STYLE),
+            TIME => Some(Self::TIME),
+            TITLE => Some(Self::TITLE),
+            VIDEO => Some(Self::VIDEO),
+            _ => None,
         }
     }
 
+    ///Returns a string slice.
     pub fn as_str(&self) -> &str {
         match self {
             Self::AHT => AHT,
@@ -106,241 +108,7 @@ impl Mark {
     }
 }
 
-///TypeEntity.
-#[derive(Debug)]
-pub enum TypeEntity {
-    AHT(Aht),
-    AREA(Area),
-    AUDIO(Audio),
-    BODY(Body),
-    BUTTON(Button),
-    CANVAS(Canv),
-    FORM(Form),
-    HEAD(Head),
-    IFRAME(Iframe),
-    IMG(Img),
-    INP(Inp),
-    OPTION(Opt),
-    PT(Pt),
-    SCRIPT(Script),
-    SELECT(Select),
-    STYLE(Style),
-    TIME(Time),
-    TITLE(Title),
-    VIDEO(Video),
-}
-
-impl TypeEntity {
-    fn from(o: ValidElement) -> Self {
-        let (n, s, mut attribute, mut subset) = o.take();
-
-        macro_rules! to_type {
-            ($t:ty) => {{
-                let mut o = <$t>::new();
-                o.text = s;
-                attribute.drain(..).for_each(|a| o.attr(a));
-                subset
-                    .drain(..)
-                    .for_each(|sub| o.subset.push_back(Self::from(sub)));
-                o
-            }};
-        }
-        macro_rules! to_type1 {
-            ($t:ty) => {{
-                let mut o = <$t>::new();
-                attribute.drain(..).for_each(|a| o.attr(a));
-                subset
-                    .drain(..)
-                    .for_each(|sub| o.subset.push_back(Self::from(sub)));
-                o
-            }};
-        }
-        macro_rules! to_type2 {
-            ($t:ty) => {{
-                let mut o = <$t>::new();
-                o.text = s;
-                attribute.drain(..).for_each(|a| o.attr(a));
-                o
-            }};
-        }
-
-        match n {
-            Mark::AHT => Self::AHT(to_type1!(Aht)),
-            Mark::AREA => Self::AREA(to_type!(Area)),
-            Mark::AUDIO => Self::AUDIO(to_type!(Audio)),
-            Mark::BODY => Self::BODY(to_type!(Body)),
-            Mark::BUTTON => Self::BUTTON(to_type!(Button)),
-            Mark::CANVAS => Self::CANVAS(to_type!(Canv)),
-            Mark::FORM => Self::FORM(to_type!(Form)),
-            Mark::HEAD => Self::HEAD(to_type!(Head)),
-            Mark::IFRAME => Self::IFRAME(to_type!(Iframe)),
-            Mark::IMG => Self::IMG(to_type!(Img)),
-            Mark::INP => Self::INP(to_type!(Inp)),
-            Mark::OPTION => Self::OPTION(to_type2!(Opt)),
-            Mark::PT => Self::PT(to_type!(Pt)),
-            Mark::SCRIPT => Self::SCRIPT(to_type!(Script)),
-            Mark::SELECT => Self::SELECT(to_type!(Select)),
-            Mark::STYLE => Self::STYLE(to_type!(Style)),
-            Mark::TIME => Self::TIME(to_type!(Time)),
-            Mark::TITLE => Self::TITLE(to_type!(Title)),
-            Mark::VIDEO => Self::VIDEO(to_type!(Video)),
-        }
-    }
-
-    ///Parse a string slice to `TypeEntity`.
-    pub fn from_str(buf: &str) -> VecDeque<Self> {
-        format::accept(buf)
-    }
-
-    ///Parse to `Page`.
-    pub fn to_page(self) -> Result<Page, Self> {
-        if let Self::AHT(o) = self {
-            let mut t = (None, None, None, None);
-            for (i, o) in o.subset.vec.into_iter().enumerate() {
-                match o {
-                    TypeEntity::HEAD(o) => {
-                        if i == 0 {
-                            t.0 = Some(o)
-                        }
-                    }
-                    TypeEntity::BODY(o) => {
-                        if i == 1 {
-                            t.1 = Some(o);
-                        }
-                    }
-                    TypeEntity::STYLE(o) => {
-                        if i == 2 {
-                            t.2 = Some(o);
-                        }
-                    }
-                    TypeEntity::SCRIPT(o) => {
-                        if i == 3 {
-                            t.3 = Some(o);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Page::new(t.0, t.1, t.2, t.3))
-        } else {
-            Err(self)
-        }
-    }
-
-    fn find_mark(&mut self, s: &str, v: &mut Vec<&mut Self>) {
-        let t = self as *mut Self;
-
-        macro_rules! find {
-            ($o:ident) => {{
-                if $o.element() == s {
-                    unsafe { v.push(&mut *t) }
-                }
-                for e in &mut $o.subset.vec {
-                    e.find_mark(s, v)
-                }
-            }};
-        }
-        match self {
-            Self::AHT(o) => find!(o),
-            Self::AREA(o) => find!(o),
-            Self::AUDIO(o) => find!(o),
-            Self::BODY(o) => find!(o),
-            Self::BUTTON(o) => find!(o),
-            Self::CANVAS(o) => find!(o),
-            Self::FORM(o) => find!(o),
-            Self::HEAD(o) => find!(o),
-            Self::IFRAME(o) => find!(o),
-            Self::IMG(o) => find!(o),
-            Self::INP(o) => find!(o),
-            Self::OPTION(_) => {}
-            Self::PT(o) => find!(o),
-            Self::SCRIPT(o) => find!(o),
-            Self::SELECT(o) => find!(o),
-            Self::STYLE(o) => find!(o),
-            Self::TIME(o) => find!(o),
-            Self::TITLE(o) => find!(o),
-            Self::VIDEO(o) => find!(o),
-        }
-    }
-
-    fn find_class(&mut self, s: &str, v: &mut Vec<&mut TypeEntity>) {
-        let t = self as *mut TypeEntity;
-        macro_rules! find {
-            ($o:ident) => {{
-                if $o.class == s {
-                    unsafe { v.push(&mut *t) }
-                }
-                for e in &mut $o.subset.vec {
-                    e.find_class(s, v)
-                }
-            }};
-        }
-        match self {
-            Self::AHT(o) => find!(o),
-            Self::AREA(o) => find!(o),
-            Self::AUDIO(o) => find!(o),
-            Self::BODY(o) => find!(o),
-            Self::BUTTON(o) => find!(o),
-            Self::CANVAS(o) => find!(o),
-            Self::FORM(o) => find!(o),
-            Self::HEAD(o) => find!(o),
-            Self::IFRAME(o) => find!(o),
-            Self::IMG(o) => find!(o),
-            Self::INP(o) => find!(o),
-            Self::OPTION(_) => {}
-            Self::PT(o) => find!(o),
-            Self::SCRIPT(o) => find!(o),
-            Self::SELECT(o) => find!(o),
-            Self::STYLE(o) => find!(o),
-            Self::TIME(o) => find!(o),
-            Self::TITLE(o) => find!(o),
-            Self::VIDEO(o) => find!(o),
-        }
-    }
-
-    fn find_id(&mut self, s: &str) -> Option<&mut TypeEntity> {
-        let t = self as *mut TypeEntity;
-        macro_rules! find {
-            ($o:ident) => {{
-                if $o.id == s {
-                    unsafe { Some(&mut *t) }
-                } else {
-                    for e in &mut $o.subset.vec {
-                        let t = e.find_id(s);
-                        if t.is_some() {
-                            return t;
-                        }
-                    }
-                    None
-                }
-            }};
-        }
-        match self {
-            Self::AHT(o) => find!(o),
-            Self::AREA(o) => find!(o),
-            Self::AUDIO(o) => find!(o),
-            Self::BODY(o) => find!(o),
-            Self::BUTTON(o) => find!(o),
-            Self::CANVAS(o) => find!(o),
-            Self::FORM(o) => find!(o),
-            Self::HEAD(o) => find!(o),
-            Self::IFRAME(o) => find!(o),
-            Self::IMG(o) => find!(o),
-            Self::INP(o) => find!(o),
-            Self::OPTION(_) => None,
-            Self::PT(o) => find!(o),
-            Self::SCRIPT(o) => find!(o),
-            Self::SELECT(o) => find!(o),
-            Self::STYLE(o) => find!(o),
-            Self::TIME(o) => find!(o),
-            Self::TITLE(o) => find!(o),
-            Self::VIDEO(o) => find!(o),
-        }
-    }
-}
-
 const ACTION: &str = "action";
-const ASYNCHRONOUS: &str = "async";
 const CLASS: &str = "class";
 const COLUMN: &str = "column";
 const DISABLED: &str = "disabled";
@@ -352,7 +120,7 @@ const ID: &str = "id";
 const LANG: &str = "lang";
 const METHOD: &str = "method";
 const MULTIPLE: &str = "multiple";
-const NAME: &str = "name ";
+const NAME: &str = "name";
 const ORDINAL: &str = "ordinal";
 const READONLY: &str = "readonly";
 const REQUIRED: &str = "required";
@@ -360,7 +128,7 @@ const ROW: &str = "row";
 const SELECTED: &str = "selected";
 const SRC: &str = "src";
 const TIP: &str = "tip";
-const VALUE: &str = "value ";
+const VALUE: &str = "value";
 const WIDTH: &str = "width";
 
 const ONABORT: &str = "onabort";
@@ -375,11 +143,89 @@ const ONLOAD: &str = "onload";
 const ONRESIZE: &str = "onresize";
 const ONSCROLL: &str = "onscroll";
 
-///Attribute.
+///Represents attribute name.
+#[derive(Debug, Eq, Hash, PartialEq)]
+pub enum AttrName {
+    ACTION,
+    CLASS,
+    COLUMN,
+    DISABLED,
+    ENCTYPE,
+    HEIGHT,
+    HIDDEN,
+    HREF,
+    ID,
+    LANG,
+    METHOD,
+    MULTIPLE,
+    NAME,
+    ORDINAL,
+    READONLY,
+    REQUIRED,
+    ROW,
+    SELECTED,
+    SRC,
+    TIP,
+    VALUE,
+    WIDTH,
+    ONABORT,
+    ONBLUR,
+    ONCANCEL,
+    ONCHANGE,
+    ONCLICK,
+    ONCLOSE,
+    ONFOCUS,
+    ONINVALID,
+    ONLOAD,
+    ONRESIZE,
+    ONSCROLL,
+}
+
+impl AttrName {
+    ///Returns a string slice.
+    pub fn as_str(&self) -> &str {
+        match self {
+            AttrName::ACTION => ACTION,
+            AttrName::CLASS => CLASS,
+            AttrName::COLUMN => COLUMN,
+            AttrName::DISABLED => DISABLED,
+            AttrName::ENCTYPE => ENCTYPE,
+            AttrName::HEIGHT => HEIGHT,
+            AttrName::HIDDEN => HIDDEN,
+            AttrName::HREF => HREF,
+            AttrName::ID => ID,
+            AttrName::LANG => LANG,
+            AttrName::METHOD => METHOD,
+            AttrName::MULTIPLE => MULTIPLE,
+            AttrName::NAME => NAME,
+            AttrName::ORDINAL => ORDINAL,
+            AttrName::READONLY => READONLY,
+            AttrName::REQUIRED => REQUIRED,
+            AttrName::ROW => ROW,
+            AttrName::SELECTED => SELECTED,
+            AttrName::SRC => SRC,
+            AttrName::TIP => TIP,
+            AttrName::VALUE => VALUE,
+            AttrName::WIDTH => WIDTH,
+            AttrName::ONABORT => ONABORT,
+            AttrName::ONBLUR => ONBLUR,
+            AttrName::ONCANCEL => ONCANCEL,
+            AttrName::ONCHANGE => ONCHANGE,
+            AttrName::ONCLICK => ONCLICK,
+            AttrName::ONCLOSE => ONCLOSE,
+            AttrName::ONFOCUS => ONFOCUS,
+            AttrName::ONINVALID => ONINVALID,
+            AttrName::ONLOAD => ONLOAD,
+            AttrName::ONRESIZE => ONRESIZE,
+            AttrName::ONSCROLL => ONSCROLL,
+        }
+    }
+}
+
+///Represents attribute.
 #[derive(Debug)]
 pub enum Attribute {
     ACTION(String),
-    ASYNCHRONOUS(bool),
     CLASS(String),
     COLUMN(Points),
     DISABLED(bool),
@@ -415,16 +261,12 @@ pub enum Attribute {
 }
 
 impl Attribute {
-    ///Converts a pair of string slice to an `Attribute`.
+    ///Converts from a pair of string. Returns Err when it's not attribute.
     pub fn from(a: &str, s: Option<String>) -> Result<Self, Option<String>> {
         match a {
             ACTION => match s {
                 Some(s) => Ok(Self::ACTION(s)),
                 None => Err(s),
-            },
-            ASYNCHRONOUS => match s {
-                Some(s) => Ok(Self::ASYNCHRONOUS(to_bool(&s))),
-                None => Ok(Self::ASYNCHRONOUS(true)),
             },
             CLASS => match s {
                 Some(s) => Ok(Self::CLASS(s)),
@@ -563,140 +405,388 @@ impl Attribute {
             _ => Err(s),
         }
     }
-}
 
-#[derive(Debug)]
-struct ValidElement {
-    mark_type: Mark,
-    text: String,
-    attribute: Vec<Attribute>,
-    subset: Vec<ValidElement>,
-}
-
-impl ValidElement {
-    fn new(mark_type: Mark, text: String) -> Self {
-        Self {
-            mark_type,
-            text,
-            attribute: Vec::new(),
-            subset: Vec::new(),
+    pub fn name(&self) -> AttrName {
+        match self {
+            Self::ACTION(_) => AttrName::ACTION,
+            Self::CLASS(_) => AttrName::CLASS,
+            Self::COLUMN(_) => AttrName::COLUMN,
+            Self::DISABLED(_) => AttrName::DISABLED,
+            Self::ENCTYPE(_) => AttrName::ENCTYPE,
+            Self::HEIGHT(_) => AttrName::HEIGHT,
+            Self::HIDDEN(_) => AttrName::HIDDEN,
+            Self::HREF(_) => AttrName::HREF,
+            Self::ID(_) => AttrName::ID,
+            Self::LANG(_) => AttrName::LANG,
+            Self::METHOD(_) => AttrName::METHOD,
+            Self::MULTIPLE(_) => AttrName::MULTIPLE,
+            Self::NAME(_) => AttrName::NAME,
+            Self::ORDINAL(_) => AttrName::ORDINAL,
+            Self::READONLY(_) => AttrName::READONLY,
+            Self::REQUIRED(_) => AttrName::REQUIRED,
+            Self::ROW(_) => AttrName::ROW,
+            Self::SELECTED(_) => AttrName::SELECTED,
+            Self::SRC(_) => AttrName::SRC,
+            Self::TIP(_) => AttrName::TIP,
+            Self::VALUE(_) => AttrName::VALUE,
+            Self::WIDTH(_) => AttrName::WIDTH,
+            Self::ONABORT(_) => AttrName::ONABORT,
+            Self::ONBLUR(_) => AttrName::ONBLUR,
+            Self::ONCANCEL(_) => AttrName::ONCANCEL,
+            Self::ONCHANGE(_) => AttrName::ONCHANGE,
+            Self::ONCLICK(_) => AttrName::ONCLICK,
+            Self::ONCLOSE(_) => AttrName::ONCLOSE,
+            Self::ONFOCUS(_) => AttrName::ONFOCUS,
+            Self::ONINVALID(_) => AttrName::ONINVALID,
+            Self::ONLOAD(_) => AttrName::ONLOAD,
+            Self::ONRESIZE(_) => AttrName::ONRESIZE,
+            Self::ONSCROLL(_) => AttrName::ONSCROLL,
         }
     }
 
-    fn take(self) -> (Mark, String, Vec<Attribute>, Vec<ValidElement>) {
-        (self.mark_type, self.text, self.attribute, self.subset)
+    pub fn to_string(&self) -> String {
+        match self {
+            Attribute::ACTION(s) => s.to_string(),
+            Attribute::CLASS(s) => s.to_string(),
+            Attribute::COLUMN(s) => s.to_string(),
+            Attribute::DISABLED(s) => s.to_string(),
+            Attribute::ENCTYPE(s) => s.to_string(),
+            Attribute::HEIGHT(s) => s.to_string(),
+            Attribute::HIDDEN(s) => s.to_string(),
+            Attribute::HREF(s) => s.to_string(),
+            Attribute::ID(s) => s.to_string(),
+            Attribute::LANG(s) => s.to_string(),
+            Attribute::METHOD(s) => s.to_string(),
+            Attribute::MULTIPLE(s) => s.to_string(),
+            Attribute::NAME(s) => s.to_string(),
+            Attribute::ORDINAL(s) => s.to_string(),
+            Attribute::READONLY(s) => s.to_string(),
+            Attribute::REQUIRED(s) => s.to_string(),
+            Attribute::ROW(s) => s.to_string(),
+            Attribute::SELECTED(s) => s.to_string(),
+            Attribute::SRC(s) => s.to_string(),
+            Attribute::TIP(s) => s.to_string(),
+            Attribute::VALUE(s) => s.to_string(),
+            Attribute::WIDTH(s) => s.to_string(),
+            Attribute::ONABORT(s) => s.to_string(),
+            Attribute::ONBLUR(s) => s.to_string(),
+            Attribute::ONCANCEL(s) => s.to_string(),
+            Attribute::ONCHANGE(s) => s.to_string(),
+            Attribute::ONCLICK(s) => s.to_string(),
+            Attribute::ONCLOSE(s) => s.to_string(),
+            Attribute::ONFOCUS(s) => s.to_string(),
+            Attribute::ONINVALID(s) => s.to_string(),
+            Attribute::ONLOAD(s) => s.to_string(),
+            Attribute::ONRESIZE(s) => s.to_string(),
+            Attribute::ONSCROLL(s) => s.to_string(),
+        }
     }
 }
 
-///"Page" represents page.
+pub(crate) struct AttributeHolder(HashMap<AttrName, Attribute>);
+
+impl AttributeHolder {
+    fn new() -> Self {
+        Self(HashMap::new())
+    }
+}
+
+impl Deref for AttributeHolder {
+    type Target = HashMap<AttrName, Attribute>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for AttributeHolder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::fmt::Debug for AttributeHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map().entries(&self.0).finish()
+    }
+}
+
+pub(crate) struct ElementHolder(VecDeque<Arc<RwLock<Element>>>);
+
+impl ElementHolder {
+    fn new() -> Self {
+        Self(VecDeque::new())
+    }
+}
+
+impl Deref for ElementHolder {
+    type Target = VecDeque<Arc<RwLock<Element>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ElementHolder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::fmt::Debug for ElementHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_list();
+        self.0.iter().for_each(|o| {
+            if let Ok(o) = o.try_read() {
+                f.entry(&o);
+            }
+        });
+        f.finish()
+    }
+}
+
+///Represents element.
+pub struct Element {
+    pub(crate) mark_type: Mark,
+    pub(crate) text: String,
+    pub(crate) attribute: AttributeHolder,
+    pub(crate) subset: ElementHolder,
+    pub(crate) upper: Option<Arc<RwLock<Element>>>,
+}
+
+impl std::fmt::Debug for Element {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Element")
+            .field("mark_type", &self.mark_type)
+            .field("text", &self.text)
+            .field("attribute", &self.attribute)
+            .field("subset", &self.subset)
+            .field("upper", &self.upper.as_ref().map(|o| Arc::as_ptr(o)))
+            .finish()
+    }
+}
+
+impl Element {
+    ///Creates a new element.
+    pub fn new(mark_type: Mark, text: String) -> Self {
+        Self {
+            mark_type,
+            text,
+            attribute: AttributeHolder::new(),
+            subset: ElementHolder::new(),
+            upper: None,
+        }
+    }
+
+    ///Parse a string slice to many.
+    pub fn many_from_str(buf: &str) -> VecDeque<Self> {
+        format::accept(buf)
+    }
+
+    ///Parse a string slice to it.
+    pub fn from_str(buf: &str) -> Option<Self> {
+        format::accept(buf).pop_front()
+    }
+
+    ///Returns a string slice of this element's type.
+    pub fn as_str(&self) -> &str {
+        self.mark_type.as_str()
+    }
+
+    pub(crate) fn set_upper(
+        &mut self,
+        upper_arc: Arc<RwLock<Element>>,
+        self_arc: Arc<RwLock<Element>>,
+    ) {
+        self.upper.replace(upper_arc);
+        self.subset.iter_mut().for_each(|o| {
+            if let Ok(mut e) = o.write() {
+                e.set_upper(self_arc.clone(), o.clone());
+            }
+        });
+    }
+
+    pub(crate) fn subset_upper(&mut self) {
+        self.subset.iter_mut().for_each(|a| {
+            if let Ok(mut e) = a.write() {
+                e.subset.iter_mut().for_each(|b| {
+                    if let Ok(mut e) = b.write() {
+                        e.set_upper(a.clone(), b.clone());
+                    }
+                });
+            }
+        });
+    }
+
+    fn equal_mark(&self, n: usize, mark_type: Mark) -> bool {
+        if let Some(o) = self.subset.get(n) {
+            if let Ok(e) = o.read() {
+                if e.mark_type == mark_type {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn page_element(
+        &self,
+    ) -> Option<(
+        Arc<RwLock<Element>>,
+        Arc<RwLock<Element>>,
+        Arc<RwLock<Element>>,
+        Arc<RwLock<Element>>,
+    )> {
+        if self.mark_type == Mark::AHT && self.subset.len() >= 4 {
+            if self.equal_mark(0, Mark::HEAD)
+                && self.equal_mark(1, Mark::BODY)
+                && self.equal_mark(2, Mark::STYLE)
+                && self.equal_mark(3, Mark::SCRIPT)
+            {
+                if let Some(head) = self.subset.get(0) {
+                    if let Some(body) = self.subset.get(1) {
+                        if let Some(style) = self.subset.get(2) {
+                            if let Some(script) = self.subset.get(3) {
+                                return Some((
+                                    head.clone(),
+                                    body.clone(),
+                                    style.clone(),
+                                    script.clone(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    ///Converts to page.
+    pub fn to_page(self) -> Result<Page, Self> {
+        if let Some((head, body, style, script)) = self.page_element() {
+            return Ok(Page::new(self, head, body, style, script));
+        }
+        Err(self)
+    }
+
+    fn subset_swap_remove(&mut self, o: Arc<RwLock<Element>>, a: Element) {
+        if let Some(i) = self
+            .subset
+            .iter()
+            .position(|k| Arc::as_ptr(&k) == Arc::as_ptr(&o))
+        {
+            self.subset.push_back(Arc::new(RwLock::new(a)));
+            self.subset.swap_remove_back(i);
+        }
+    }
+
+    fn subset_find(
+        &self,
+        self_arc: Arc<RwLock<Element>>,
+        o: Arc<RwLock<Element>>,
+    ) -> Option<Arc<RwLock<Element>>> {
+        self.subset.iter().find_map(|k| {
+            if Arc::as_ptr(&k) == Arc::as_ptr(&o) {
+                Some(self_arc.clone())
+            } else {
+                if let Ok(e) = k.read() {
+                    e.subset_find(k.clone(), o.clone())
+                } else {
+                    None
+                }
+            }
+        })
+    }
+}
+
+//------------------------------------------------------------------------------------------
+
+///Represents page.
 #[derive(Debug)]
 pub struct Page {
-    head: Option<Box<TypeEntity>>,
-    body: Option<Box<TypeEntity>>,
-    style: Option<Box<TypeEntity>>,
-    script: Option<Box<TypeEntity>>,
+    root: Element,
+    head_element: Arc<RwLock<Element>>,
+    body_element: Arc<RwLock<Element>>,
+    style_element: Arc<RwLock<Element>>,
+    script_element: Arc<RwLock<Element>>,
+    head: Head,
+    body: Body,
+    style: Style,
+    script: Script,
     pub(crate) cursor: VisionAction,
+    pub(crate) keyboard_input: Option<Arc<RwLock<String>>>,
 }
 
 impl Page {
     fn new(
-        head: Option<Head>,
-        body: Option<Body>,
-        style: Option<Style>,
-        script: Option<Script>,
+        root: Element,
+        head_element: Arc<RwLock<Element>>,
+        body_element: Arc<RwLock<Element>>,
+        style_element: Arc<RwLock<Element>>,
+        script_element: Arc<RwLock<Element>>,
     ) -> Self {
+        let head = Head::new(head_element.clone());
+        let body = Body::new(body_element.clone());
+        let style = Style::new(style_element.clone());
+        let script = Script::new(script_element.clone());
         let mut page = Self {
-            head: head.map(|o| Box::new(TypeEntity::HEAD(o))),
-            body: body.map(|o| Box::new(TypeEntity::BODY(o))),
-            style: style.map(|o| Box::new(TypeEntity::STYLE(o))),
-            script: script.map(|o| Box::new(TypeEntity::SCRIPT(o))),
+            root,
+            head_element,
+            body_element,
+            style_element,
+            script_element,
+            head,
+            body,
+            style,
+            script,
             cursor: VisionAction::new(),
+            keyboard_input: None,
         };
 
         let p = &mut page as *mut Self;
-        if let Some(t) = &mut page.body {
-            let t = t.as_mut();
-            let o = t as *mut TypeEntity;
-            if let TypeEntity::BODY(body) = t {
-                unsafe {
-                    body.set_parent(&mut *o);
-                    page.style(|o| o.build(&mut *p));
-                }
-            }
-        }
+        page.style.build(unsafe { &mut *p });
+        page.script.run(unsafe { &mut *p });
         page
     }
 
-    ///Parse a string slice to `Page`.
-    pub fn from_str(buf: &str) -> EntityResult {
-        if let Some(e) = TypeEntity::from_str(buf).pop_front() {
-            match e.to_page() {
-                Ok(p) => EntityResult::Page(p),
-                Err(e) => EntityResult::TypeEntity(e),
-            }
-        } else {
-            EntityResult::None
-        }
+    ///Parse a string slice.
+    pub fn from_str(buf: &str) -> Option<Self> {
+        Element::from_str(buf)?.to_page().ok()
     }
 
-    ///Returns true if the `Page` doesn't contain `Head` or `Body` or `Style` or `Script`.
-    pub fn incomplete(&self) -> bool {
-        self.head.is_none() || self.body.is_none() || self.style.is_none() || self.script.is_none()
+    pub(crate) fn body_element(&self) -> Arc<RwLock<Element>> {
+        self.body_element.clone()
     }
 
-    fn body(&mut self, f: impl Fn(&mut Body)) -> bool {
-        if let Some(t) = &mut self.body {
-            if let TypeEntity::BODY(body) = t.as_mut() {
-                f(body);
-                return true;
-            }
-        }
-        false
-    }
-
-    fn style(&mut self, f: impl Fn(&mut Style)) -> bool {
-        if let Some(t) = &mut self.style {
-            if let TypeEntity::STYLE(style) = t.as_mut() {
-                f(style);
-                return true;
-            }
-        }
-        false
-    }
-
-    fn script(&mut self, f: impl Fn(&mut Script)) -> bool {
-        if let Some(t) = &mut self.script {
-            if let TypeEntity::SCRIPT(script) = t.as_mut() {
-                f(script);
-                return true;
-            }
-        }
-        false
+    pub(crate) fn body(&mut self) -> &mut Body {
+        &mut self.body
     }
 
     pub fn set_zero(&mut self, x: isize, y: isize) {
-        self.body(|o| o.set_zero(x, y));
+        self.body.set_zero(x, y);
     }
 
     pub fn resize(&mut self, width: isize, height: isize) {
-        self.body(|o| o.resize(width, height));
+        self.body.resize(width, height);
     }
 
     ///Returns true if draw.
     pub fn draw(&mut self, canvas: &Canvas) -> bool {
         let p = self as *mut Self;
-        self.body(|o| o.draw(canvas, unsafe { &mut *p }))
+        self.body.draw(canvas, unsafe { &mut *p });
+        false
     }
 
-    pub fn find_mark(&mut self, s: Mark) -> Vec<&mut TypeEntity> {
+    pub fn find_mark(&mut self, s: Mark) -> Vec<Arc<RwLock<Element>>> {
         self.find(Conditions::new_with_mark(s))
     }
 
-    pub fn find_class(&mut self, s: &str) -> Vec<&mut TypeEntity> {
+    pub fn find_class(&mut self, s: &str) -> Vec<Arc<RwLock<Element>>> {
         self.find(Conditions::new_with_class(s))
     }
 
-    pub fn find_id(&mut self, s: &str) -> Option<&mut TypeEntity> {
+    pub fn find_id(&mut self, s: &str) -> Option<Arc<RwLock<Element>>> {
         let mut v = self.find(Conditions::new_with_id(s));
         if v.is_empty() {
             None
@@ -705,70 +795,112 @@ impl Page {
         }
     }
 
-    fn head_body(&mut self) -> Vec<&mut TypeEntity> {
-        let mut v = Vec::new();
-        if let Some(t) = &mut self.head {
-            v.push(t.as_mut())
-        }
-        if let Some(t) = &mut self.body {
-            v.push(t.as_mut())
-        }
-        v
+    ///Find `Element` references by `Conditions`.
+    pub fn find(&mut self, conditions: Conditions) -> Vec<Arc<RwLock<Element>>> {
+        let v = vec![self.head_element.clone(), self.body_element.clone()];
+        find_elements(v, conditions)
     }
 
-    ///Find `TypeEntity` references by `Conditions`.
-    pub fn find(&mut self, conditions: Conditions) -> Vec<&mut TypeEntity> {
-        let mut v = self.head_body();
-        for c in conditions.v {
-            let mut r = Vec::new();
-            match c {
-                Condition::MARK(s) => {
-                    v.into_iter().for_each(|t| t.find_mark(s.as_str(), &mut r));
-                }
-                Condition::CLASS(s) => {
-                    v.into_iter().for_each(|t| t.find_class(&s, &mut r));
-                }
-                Condition::ID(s) => {
-                    for t in v {
-                        if let Some(p) = t.find_id(&s) {
-                            r.push(p);
-                            break;
-                        }
-                    }
-                }
-            }
-            v = r;
-        }
-        v
+    pub fn find_in_body(&mut self, conditions: Conditions) -> Vec<Arc<RwLock<Element>>> {
+        let v = vec![self.body_element()];
+        find_elements(v, conditions)
     }
 
     pub fn set_cursor(&mut self, p: VisionPosition) {
         self.cursor.add(p);
     }
+
+    pub fn keyboard_input(&mut self, s: &str) {
+        if let Some(o) = &mut self.keyboard_input {
+            if let Ok(mut o) = o.try_write() {
+                o.push_str(s);
+            }
+        }
+    }
 }
 
-///EntityResult.
+pub(crate) fn find_elements(
+    mut v: Vec<Arc<RwLock<Element>>>,
+    conditions: Conditions,
+) -> Vec<Arc<RwLock<Element>>> {
+    for c in conditions.get() {
+        let mut r = Vec::new();
+        match c {
+            Condition::MARK(s) => {
+                v.into_iter().for_each(|t| find_mark(t, &s, &mut r));
+            }
+            Condition::CLASS(s) => {
+                v.into_iter().for_each(|t| find_class(t, &s, &mut r));
+            }
+            Condition::ID(s) => {
+                for t in v {
+                    if let Some(p) = find_id(t, &s) {
+                        r.push(p);
+                        break;
+                    }
+                }
+            }
+        }
+        v = r;
+    }
+    v
+}
+
+fn find_mark(o: Arc<RwLock<Element>>, s: &Mark, v: &mut Vec<Arc<RwLock<Element>>>) {
+    if let Ok(e) = o.read() {
+        if e.mark_type == *s {
+            v.push(o.clone())
+        }
+        for k in e.subset.iter() {
+            find_mark(k.clone(), s, v)
+        }
+    }
+}
+
+fn find_class(o: Arc<RwLock<Element>>, s: &str, v: &mut Vec<Arc<RwLock<Element>>>) {
+    if let Ok(e) = o.read() {
+        if let Some(Attribute::CLASS(k)) = e.attribute.get(&AttrName::CLASS) {
+            if k == s {
+                v.push(o.clone());
+            }
+        }
+        for k in e.subset.iter() {
+            find_class(k.clone(), s, v)
+        }
+    }
+}
+
+fn find_id(o: Arc<RwLock<Element>>, s: &str) -> Option<Arc<RwLock<Element>>> {
+    if let Ok(e) = o.read() {
+        if let Some(Attribute::ID(k)) = e.attribute.get(&AttrName::ID) {
+            if k == s {
+                return Some(o.clone());
+            }
+        }
+        for k in e.subset.iter() {
+            let t = find_id(k.clone(), s);
+            if t.is_some() {
+                return t;
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug)]
-pub enum EntityResult {
-    Page(Page),
-    TypeEntity(TypeEntity),
-    None,
-}
-
 enum Condition {
     MARK(Mark),
     CLASS(String),
     ID(String),
 }
 
-///find conditions.
-pub struct Conditions {
-    v: Vec<Condition>,
-}
+///Represents find conditions.
+#[derive(Debug)]
+pub struct Conditions(Vec<Condition>);
 
 impl Conditions {
-    fn new() -> Self {
-        Self { v: Vec::new() }
+    pub fn new() -> Self {
+        Self(Vec::new())
     }
 
     pub fn new_with_mark(s: Mark) -> Self {
@@ -789,31 +921,43 @@ impl Conditions {
         c
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn get(&self) -> &Vec<Condition> {
+        &self.0
+    }
+
     pub fn mark(&mut self, s: Mark) {
-        self.v.push(Condition::MARK(s));
+        self.0.push(Condition::MARK(s));
     }
 
     pub fn class(&mut self, s: impl Into<String>) {
-        self.v.push(Condition::CLASS(s.into()))
+        self.0.push(Condition::CLASS(s.into()))
     }
 
     pub fn id(&mut self, s: impl Into<String>) {
-        self.v.push(Condition::ID(s.into()))
+        self.0.push(Condition::ID(s.into()))
+    }
+
+    pub fn reverse(&mut self) {
+        self.0.reverse()
     }
 }
 
-///CursorAction.
+///Represents cursor action.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CursorAction {
     Down(usize),
     Up,
 }
 
-///VisionPosition.
+///Represents cursor position and action.
 #[derive(Debug)]
 pub struct VisionPosition {
-    pub xy: Coord2D,
-    pub action: CursorAction,
+    xy: Coord2D,
+    action: CursorAction,
 }
 
 impl VisionPosition {
@@ -864,40 +1008,81 @@ impl VisionAction {
         }
     }
 
-    pub(crate) fn analyse(&self) -> VisionActionResult {
+    pub(crate) fn position(&self) -> Option<&Coord2D> {
+        let (fir, _) = self.ordered();
+        if let Some(fir) = fir {
+            return Some(&fir.xy);
+        }
+        None
+    }
+
+    pub(crate) fn analyse(&self) -> Option<(&Coord2D, VisionActionResult)> {
         let (fir, sec) = self.ordered();
         if let Some(fir) = fir {
             match fir.action {
                 CursorAction::Down(n) => {
                     if let Some(sec) = sec {
-                        if fir.action == sec.action {
-                            return VisionActionResult::PressSweep(
+                        if let CursorAction::Down(_) = sec.action {
+                            return Some((
                                 &fir.xy,
-                                fir.xy.away_from(&sec.xy),
-                            );
+                                VisionActionResult::PressSweep(fir.xy.away_from(&sec.xy)),
+                            ));
                         }
                     }
-                    return VisionActionResult::Press(&fir.xy, n);
+                    return Some((&fir.xy, VisionActionResult::Press(n)));
                 }
                 CursorAction::Up => {
                     if let Some(sec) = sec {
-                        if fir.action == sec.action {
-                            return VisionActionResult::Sweep(&fir.xy, fir.xy.away_from(&sec.xy));
+                        if sec.action == CursorAction::Up {
+                            return Some((
+                                &fir.xy,
+                                VisionActionResult::Sweep(fir.xy.away_from(&sec.xy)),
+                            ));
                         }
                     }
-                    return VisionActionResult::Loosen(&fir.xy);
+                    return Some((&fir.xy, VisionActionResult::Loosen));
                 }
             }
         }
-        VisionActionResult::None
+        None
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum VisionActionResult<'a> {
-    Press(&'a Coord2D, usize),
-    Sweep(&'a Coord2D, RectSide),
-    PressSweep(&'a Coord2D, RectSide),
-    Loosen(&'a Coord2D),
-    None,
+pub(crate) enum VisionActionResult {
+    Press(usize),
+    Sweep(RectSide),
+    PressSweep(RectSide),
+    Loosen,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn element() {
+        let s = "<aht>
+        <head lang=en>
+            <title>1</title>
+        </head>
+        <body column=\"\" row=\"2\">
+            <inp name=\"\" value=\"\" readonly required>input</inp>
+            <button href=\"\" async=true>button</button>
+            <area class=\"\" id=\"\" width=\"1000\" height=\"100\" column=2 row=\"\"></area>
+        </body>
+        <style>
+        </style>
+        <script>
+        </script>
+     </aht>";
+        if let Some(e) = Element::from_str(&s) {
+            println!("{:?}", e);
+        }
+
+        if let Some(e) = Page::from_str(&s) {
+            println!("{:?}", e);
+        }
+    }
 }
