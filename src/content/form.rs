@@ -1,549 +1,280 @@
-use super::*;
-use crate::markup::{Attribute, Page, TypeEntity, BUTTON, FORM, INP, OPTION, PT, SELECT, TIME};
-use crate::parts::{
-    AlignPattern, ApplyFont, Coord, Ordinal, Painter, Range, ScrollBar, Sides, Subset,
-};
+use super::{Border, DrawUnitWrapper, OutPainter};
+use crate::global::*;
+use crate::grid::{AlignPattern, ApplyFont, Painter, Range, ScrollBar};
+use crate::markup::{Mark, Page, VisionActionResult};
+use crate::parts::{Chronograph, Coord2D};
 use skia_safe::Canvas;
+use std::sync::{Arc, RwLock};
 
 ///"Button" represents a button.
 #[derive(Debug)]
-pub struct Button {
-    pub subset: Subset,
-    pub text: String,
-    pub asynchronous: bool,
-    pub class: String,
-    pub disabled: bool,
-    pub hidden: bool,
-    pub href: String,
-    pub id: String,
-    pub name: String,
-    pub ordinal: Ordinal,
-    pub tip: String,
-    pub value: String,
-    pub zero: Coord,
-    pub side: Sides,
-    pub background: Box<dyn Painter>,
-    pub align_pattern: AlignPattern,
-    pub apply_font: ApplyFont,
-    parent: *mut TypeEntity,
+pub(crate) struct Button {
+    background: Box<dyn Painter>,
+    align_pattern: AlignPattern,
+    apply_font: ApplyFont,
+    time_meter: Chronograph,
 }
 
 impl Button {
     pub(crate) fn new() -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            asynchronous: false,
-            class: String::new(),
-            disabled: false,
-            hidden: false,
-            href: String::new(),
-            id: String::new(),
-            name: String::new(),
-            ordinal: Ordinal::None,
-            tip: String::new(),
-            value: String::new(),
-            zero: Coord::new(),
-            side: Sides::pixel(300, 50),
-            background: Box::new(range!(SURFACE_COLOR, 10, 10)),
+            background: Box::new(range!(*default_surface_color(), 10, 10)),
             align_pattern: AlignPattern::center_middle(),
             apply_font: ApplyFont::new(),
-            parent: std::ptr::null_mut(),
+            time_meter: Chronograph::new(1000),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::ASYNCHRONOUS(a) => self.asynchronous = a,
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::DISABLED(a) => self.disabled = a,
-            Attribute::HEIGHT(a) => self.side.height = a,
-            Attribute::HIDDEN(a) => self.hidden = a,
-            Attribute::HREF(a) => self.href = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::NAME(a) => self.name = a,
-            Attribute::ORDINAL(a) => self.ordinal = a,
-            Attribute::TIP(a) => self.tip = a,
-            Attribute::VALUE(a) => self.value = a,
-            Attribute::WIDTH(a) => self.side.width = a,
-            _ => {}
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
+        let r = wrapper.rect();
+
+        if self.time_meter.elapsed() {
+            self.background.as_mut().set_color(*default_surface_color());
         }
-    }
-
-    element!(BUTTON);
-
-    zero!();
-
-    set_parent!();
-
-    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        if self.disabled || self.hidden {
-            return;
+        if wrapper.cursor {
+            if let Some(a) = page.cursor.analyse() {
+                match a.1 {
+                    VisionActionResult::Press(_) => {
+                        self.background.as_mut().set_color(*default_button_color());
+                        self.time_meter.refresh();
+                    }
+                    _ => {}
+                }
+            }
         }
 
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
         self.background.as_mut().act(&r, canvas);
-        self.apply_font
-            .draw(&r, &self.align_pattern, &self.text, canvas);
-        self.subset.draw(canvas, page);
+
+        if let Ok(e) = wrapper.element.read() {
+            self.apply_font
+                .draw(&r, &self.align_pattern, &e.text, canvas);
+        }
     }
 }
 
 ///"Form" represents form.
 #[derive(Debug)]
-pub struct Form {
-    pub subset: Subset,
-    pub text: String,
-    pub action: String,
-    pub asynchronous: bool,
-    pub class: String,
-    pub enctype: String,
-    pub id: String,
-    pub method: String,
-    pub name: String,
-}
+pub(crate) struct Form {}
 
 impl Form {
     pub(crate) fn new() -> Self {
-        Self {
-            subset: Subset::new(),
-            text: String::new(),
-            action: String::new(),
-            asynchronous: false,
-            class: String::new(),
-            enctype: String::new(),
-            id: String::new(),
-            method: String::new(),
-            name: String::new(),
-        }
+        Self {}
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::ACTION(a) => self.action = a,
-            Attribute::ASYNCHRONOUS(a) => self.asynchronous = a,
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::ENCTYPE(a) => self.enctype = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::METHOD(a) => self.method = a,
-            Attribute::NAME(a) => self.name = a,
-            _ => {}
+    fn fit(&mut self, mark_type: &Mark) -> bool {
+        match mark_type {
+            Mark::INP | Mark::PT | Mark::SELECT | Mark::TIME => true,
+            _ => false,
         }
     }
-
-    element!(FORM);
 }
 
 ///"Inp" represents input.
-#[derive(Debug)]
-pub struct Inp {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub disabled: bool,
-    pub hidden: bool,
-    pub id: String,
-    pub multiple: bool,
-    pub name: String,
-    pub ordinal: Ordinal,
-    pub readonly: bool,
-    pub required: bool,
-    pub tip: String,
-    pub value: String,
-    pub zero: Coord,
-    pub side: Sides,
-    pub background: Box<dyn Painter>,
-    pub align_pattern: AlignPattern,
-    pub apply_font: ApplyFont,
-    pub outside: Box<dyn OutPainter>,
+pub(crate) struct Inp {
+    input: Arc<RwLock<String>>,
+    background: Box<dyn Painter>,
+    align_pattern: AlignPattern,
+    apply_font: ApplyFont,
+    outside: Box<dyn OutPainter>,
     scroll_bar: ScrollBar,
-    parent: *mut TypeEntity,
+}
+
+impl std::fmt::Debug for Inp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Inp");
+        if let Ok(o) = self.input.try_read() {
+            f.field("input", &o);
+        }
+        f.field("background", &self.background)
+            .field("align_pattern", &self.align_pattern)
+            .field("apply_font", &self.apply_font)
+            .field("outside", &self.outside)
+            .field("scroll_bar", &self.scroll_bar)
+            .finish()
+    }
 }
 
 impl Inp {
     pub(crate) fn new() -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            disabled: false,
-            hidden: false,
-            id: String::new(),
-            multiple: false,
-            name: String::new(),
-            ordinal: Ordinal::None,
-            readonly: false,
-            required: false,
-            tip: String::new(),
-            value: String::new(),
-            zero: Coord::new(),
-            side: Sides::pixel(100, 50),
+            input: Arc::new(RwLock::new(String::new())),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
             outside: Box::new(Border::new()),
             scroll_bar: ScrollBar::new(),
-            parent: std::ptr::null_mut(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::DISABLED(a) => self.disabled = a,
-            Attribute::HEIGHT(a) => self.side.height = a,
-            Attribute::HIDDEN(a) => self.hidden = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::MULTIPLE(a) => self.multiple = a,
-            Attribute::NAME(a) => self.name = a,
-            Attribute::ORDINAL(a) => self.ordinal = a,
-            Attribute::READONLY(a) => self.readonly = a,
-            Attribute::REQUIRED(a) => self.required = a,
-            Attribute::TIP(a) => self.tip = a,
-            Attribute::VALUE(a) => self.value = a,
-            Attribute::WIDTH(a) => self.side.width = a,
-            _ => {}
-        }
-    }
+    right_bottom!();
 
-    element!(INP);
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
+        let r = wrapper.rect();
 
-    zero!();
-
-    set_parent!();
-
-    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        if self.disabled || self.hidden {
-            return;
-        }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
-        self.apply_font
-            .draw(&r, &self.align_pattern, &self.text, canvas);
+
+        if let Some(a) = page.cursor.analyse() {
+            match a.1 {
+                VisionActionResult::Press(_) => {
+                    if wrapper.cursor {
+                        self.apply_font.set_cursor(true);
+                        page.keyboard_input.replace(self.input.clone());
+                    } else {
+                        self.apply_font.set_cursor(false);
+                        page.keyboard_input.take();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Ok(mut i) = self.input.try_write() {
+            if i.len() > 0 {
+                if let Ok(mut e) = wrapper.element.try_write() {
+                    e.text.push_str(i.drain(..).as_str());
+                }
+            }
+        }
+        if let Ok(e) = wrapper.element.read() {
+            self.apply_font
+                .draw(&r, &self.align_pattern, &e.text, canvas);
+        }
     }
 }
 
 ///"Opt" represents an option.
 #[derive(Debug)]
-pub struct Opt {
-    pub text: String,
-    pub disabled: bool,
-    pub selected: bool,
-    pub value: String,
-    pub zero: Coord,
-    pub side: Sides,
-    pub background: Box<dyn Painter>,
-    pub align_pattern: AlignPattern,
-    pub apply_font: ApplyFont,
-    pub outside: Box<dyn OutPainter>,
-    parent: *mut TypeEntity,
+pub(crate) struct Opt {
+    background: Box<dyn Painter>,
+    align_pattern: AlignPattern,
+    apply_font: ApplyFont,
+    outside: Box<dyn OutPainter>,
 }
 
 impl Opt {
     pub(crate) fn new() -> Self {
         Self {
-            text: String::new(),
-            disabled: false,
-            selected: false,
-            value: String::new(),
-            zero: Coord::new(),
-            side: Sides::pixel(100, 50),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
             outside: Box::new(Border::new()),
-            parent: std::ptr::null_mut(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::DISABLED(a) => self.disabled = a,
-            Attribute::SELECTED(a) => self.selected = a,
-            Attribute::VALUE(a) => self.value = a,
-            _ => {}
-        }
-    }
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
+        let r = wrapper.rect();
 
-    element!(OPTION);
-
-    pub(crate) fn set_parent(&mut self, parent_ptr: &mut TypeEntity) {
-        self.parent = parent_ptr;
-    }
-
-    pub(crate) fn resize(&mut self) {}
-
-    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        if self.disabled {
-            return;
-        }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
-        self.apply_font
-            .draw(&r, &self.align_pattern, &self.text, canvas);
+
+        if let Ok(e) = wrapper.element.read() {
+            self.apply_font
+                .draw(&r, &self.align_pattern, &e.text, canvas);
+        }
     }
 }
 
 ///"Pt" represents plain text.
 #[derive(Debug)]
-pub struct Pt {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub hidden: bool,
-    pub id: String,
-    pub ordinal: Ordinal,
-    pub tip: String,
-    pub zero: Coord,
-    pub side: Sides,
-    pub background: Box<dyn Painter>,
-    pub align_pattern: AlignPattern,
-    pub apply_font: ApplyFont,
-    pub outside: Box<dyn OutPainter>,
-    parent: *mut TypeEntity,
+pub(crate) struct Pt {
+    background: Box<dyn Painter>,
+    align_pattern: AlignPattern,
+    apply_font: ApplyFont,
+    outside: Box<dyn OutPainter>,
 }
 
 impl Pt {
     pub(crate) fn new() -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            hidden: false,
-            id: String::new(),
-            ordinal: Ordinal::None,
-            tip: String::new(),
-            zero: Coord::new(),
-            side: Sides::pixel(100, 50),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
             outside: Box::new(Border::new()),
-            parent: std::ptr::null_mut(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::HEIGHT(a) => self.side.height = a,
-            Attribute::HIDDEN(a) => self.hidden = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::ORDINAL(a) => self.ordinal = a,
-            Attribute::TIP(a) => self.tip = a,
-            Attribute::WIDTH(a) => self.side.width = a,
-            _ => {}
-        }
-    }
+    right_bottom!();
 
-    element!(PT);
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
+        let r = wrapper.rect();
 
-    zero!();
-
-    set_parent!();
-
-    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        if self.hidden {
-            return;
-        }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
-        self.apply_font
-            .draw(&r, &self.align_pattern, &self.text, canvas);
+
+        if let Ok(e) = wrapper.element.read() {
+            self.apply_font
+                .draw(&r, &self.align_pattern, &e.text, canvas);
+        }
     }
 }
 
 ///"Select" represents a select.
 #[derive(Debug)]
-pub struct Select {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub disabled: bool,
-    pub hidden: bool,
-    pub id: String,
-    pub multiple: bool,
-    pub name: String,
-    pub ordinal: Ordinal,
-    pub required: bool,
-    pub tip: String,
-    pub zero: Coord,
-    pub side: Sides,
-    pub background: Box<dyn Painter>,
-    pub align_pattern: AlignPattern,
-    pub apply_font: ApplyFont,
-    pub outside: Box<dyn OutPainter>,
+pub(crate) struct Select {
+    background: Box<dyn Painter>,
+    align_pattern: AlignPattern,
+    apply_font: ApplyFont,
+    outside: Box<dyn OutPainter>,
     scroll_bar: ScrollBar,
-    parent: *mut TypeEntity,
 }
 
 impl Select {
     pub(crate) fn new() -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            disabled: false,
-            hidden: false,
-            id: String::new(),
-            multiple: false,
-            name: String::new(),
-            ordinal: Ordinal::None,
-            required: false,
-            tip: String::new(),
-            zero: Coord::new(),
-            side: Sides::pixel(100, 50),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
             outside: Box::new(Border::new()),
             scroll_bar: ScrollBar::new(),
-            parent: std::ptr::null_mut(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::DISABLED(a) => self.disabled = a,
-            Attribute::HEIGHT(a) => self.side.height = a,
-            Attribute::HIDDEN(a) => self.hidden = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::MULTIPLE(a) => self.multiple = a,
-            Attribute::NAME(a) => self.name = a,
-            Attribute::ORDINAL(a) => self.ordinal = a,
-            Attribute::REQUIRED(a) => self.required = a,
-            Attribute::TIP(a) => self.tip = a,
-            Attribute::WIDTH(a) => self.side.width = a,
-            _ => {}
-        }
-    }
+    right_bottom!();
 
-    element!(SELECT);
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
+        let r = wrapper.rect();
 
-    zero!();
-
-    set_parent!();
-
-    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        if self.disabled || self.hidden {
-            return;
-        }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
-        self.apply_font
-            .draw(&r, &self.align_pattern, &self.text, canvas);
+
+        if let Ok(e) = wrapper.element.read() {
+            self.apply_font
+                .draw(&r, &self.align_pattern, &e.text, canvas);
+        }
     }
 }
 
 ///"Time" represents date time.
 #[derive(Debug)]
-pub struct Time {
-    pub subset: Subset,
-    pub text: String,
-    pub class: String,
-    pub disabled: bool,
-    pub hidden: bool,
-    pub id: String,
-    pub name: String,
-    pub ordinal: Ordinal,
-    pub readonly: bool,
-    pub required: bool,
-    pub tip: String,
-    pub value: String,
-    pub zero: Coord,
-    pub side: Sides,
-    pub background: Box<dyn Painter>,
-    pub align_pattern: AlignPattern,
-    pub apply_font: ApplyFont,
-    pub outside: Box<dyn OutPainter>,
-    parent: *mut TypeEntity,
+pub(crate) struct Time {
+    background: Box<dyn Painter>,
+    align_pattern: AlignPattern,
+    apply_font: ApplyFont,
+    outside: Box<dyn OutPainter>,
 }
 
 impl Time {
     pub(crate) fn new() -> Self {
         Self {
-            subset: Subset::new(),
-            text: String::new(),
-            class: String::new(),
-            disabled: false,
-            hidden: false,
-            id: String::new(),
-            name: String::new(),
-            ordinal: Ordinal::None,
-            readonly: false,
-            required: false,
-            tip: String::new(),
-            value: String::new(),
-            zero: Coord::new(),
-            side: Sides::pixel(100, 50),
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::left_middle(),
             apply_font: ApplyFont::new(),
             outside: Box::new(Border::new()),
-            parent: std::ptr::null_mut(),
         }
     }
 
-    pub fn attr(&mut self, attr: Attribute) {
-        match attr {
-            Attribute::CLASS(a) => self.class = a,
-            Attribute::DISABLED(a) => self.disabled = a,
-            Attribute::HEIGHT(a) => self.side.height = a,
-            Attribute::HIDDEN(a) => self.hidden = a,
-            Attribute::ID(a) => self.id = a,
-            Attribute::NAME(a) => self.name = a,
-            Attribute::ORDINAL(a) => self.ordinal = a,
-            Attribute::READONLY(a) => self.readonly = a,
-            Attribute::REQUIRED(a) => self.required = a,
-            Attribute::TIP(a) => self.tip = a,
-            Attribute::VALUE(a) => self.value = a,
-            Attribute::WIDTH(a) => self.side.width = a,
-            _ => {}
-        }
-    }
+    right_bottom!();
 
-    element!(TIME);
+    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
+        let r = wrapper.rect();
 
-    zero!();
-
-    set_parent!();
-
-    pub fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        if self.disabled || self.hidden {
-            return;
-        }
-
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
-            return;
-        }
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
-        self.apply_font
-            .draw(&r, &self.align_pattern, &self.text, canvas);
+
+        if let Ok(e) = wrapper.element.read() {
+            self.apply_font
+                .draw(&r, &self.align_pattern, &e.text, canvas);
+        }
     }
 }
