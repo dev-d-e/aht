@@ -21,6 +21,7 @@ pub(super) struct Context<'a> {
     n: usize,
     temporary: String,
     temporary_attr: (String, String),
+    temporary_escape: String,
     parser: Box<&'a mut dyn XParser>,
 }
 
@@ -33,23 +34,44 @@ impl<'a> Context<'a> {
             n: 0,
             temporary: String::new(),
             temporary_attr: (String::new(), String::new()),
+            temporary_escape: String::new(),
             parser: Box::new(parser),
         }
     }
 
-    fn attribute(&mut self) {
+    fn attribute_k(&mut self) -> Option<String> {
         let k = self.temporary_attr.0.drain(..);
         let k = k.as_str();
         if k.is_empty() {
-            return;
+            None
+        } else {
+            Some(k.to_string())
         }
-        let k = k.to_string();
+    }
+
+    fn attribute_v(&mut self) -> Option<String> {
         let v = self.temporary_attr.1.drain(..);
         let v = v.as_str();
         if v.is_empty() {
-            self.parser.attribute(k, None);
+            None
         } else {
-            self.parser.attribute(k, Some(v.to_string()));
+            Some(v.to_string())
+        }
+    }
+
+    fn attribute(&mut self) {
+        if let Some(k) = self.attribute_k() {
+            let v = self.attribute_v();
+            self.parser.attribute(k, v);
+        }
+    }
+
+    fn attribute_push(&mut self) {
+        if let Some(k) = self.attribute_k() {
+            self.parser.attribute(k, None);
+            if let Some(v) = self.attribute_v() {
+                self.temporary_attr.0.push_str(&v);
+            }
         }
     }
 }
@@ -72,6 +94,35 @@ fn series_space(context: &mut Context) {
     }
 }
 
+fn escaping(context: &mut Context) {
+    let c = context.c;
+    context.temporary_escape.push(c);
+    if c == SEMICOLON {
+        match context.temporary_escape.drain(..).as_str() {
+            "&amp;" => {
+                context.temporary_attr.1.push(AMPERSAND);
+            }
+            "&apos;" => {
+                context.temporary_attr.1.push(APOSTROPHE);
+            }
+            "&gt;" => {
+                context.temporary_attr.1.push(GT);
+            }
+            "&lt;" => {
+                context.temporary_attr.1.push(LT);
+            }
+            "&nbsp;" => {
+                context.temporary_attr.1.push(SPACE);
+            }
+            "&quot;" => {
+                context.temporary_attr.1.push(QUOTATION);
+            }
+            _ => {}
+        }
+        context.current_function = context.next_function;
+    }
+}
+
 fn tag_0(context: &mut Context) {
     let c = context.c;
     if c == LT {
@@ -90,47 +141,16 @@ fn tag_1(context: &mut Context) {
     let c = context.c;
     if c == SLASH {
         context.current_function = series_space;
-        context.next_function = tag_4;
+        context.next_function = tag_2;
     } else if c == GT {
         context.current_function = tag_0;
     } else {
-        context.current_function = tag_2;
-        tag_2(context);
+        context.current_function = tag_3;
+        tag_3(context);
     }
 }
 
 fn tag_2(context: &mut Context) {
-    let c = context.c;
-    if c == GT {
-        let t = context.temporary.drain(..).collect();
-        context.parser.start_tag(t);
-        context.current_function = tag_0;
-    } else if c == SLASH {
-        let t = context.temporary.drain(..).collect();
-        context.parser.start_tag(t);
-        context.parser.end_slash();
-        context.current_function = series_space;
-        context.next_function = tag_3;
-    } else if c == SPACE {
-        let t = context.temporary.drain(..).collect();
-        context.parser.start_tag(t);
-        context.current_function = series_space;
-        context.next_function = attribute_0;
-    } else {
-        context.temporary.push(c);
-    }
-}
-
-fn tag_3(context: &mut Context) {
-    let c = context.c;
-    if c == GT {
-        context.current_function = tag_0;
-    } else {
-        context.parser.error(context.n);
-    }
-}
-
-fn tag_4(context: &mut Context) {
     let c = context.c;
     if c == GT {
         if !context.temporary.is_empty() {
@@ -143,19 +163,79 @@ fn tag_4(context: &mut Context) {
     }
 }
 
-fn attribute_0(context: &mut Context) {
+fn tag_3(context: &mut Context) {
+    let c = context.c;
+    if c == GT {
+        let t = context.temporary.drain(..).collect();
+        context.parser.start_tag(t);
+        context.current_function = tag_0;
+    } else if c == SLASH {
+        let t = context.temporary.drain(..).collect();
+        context.parser.start_tag(t);
+        context.parser.end_slash();
+        context.current_function = series_space;
+        context.next_function = tag_4;
+    } else if c == SPACE {
+        let t = context.temporary.drain(..).collect();
+        context.parser.start_tag(t);
+        context.current_function = series_space;
+        context.next_function = tag_5;
+    } else {
+        context.temporary.push(c);
+    }
+}
+
+fn tag_4(context: &mut Context) {
+    let c = context.c;
+    if c == GT {
+        context.current_function = tag_0;
+    } else {
+        context.parser.error(context.n);
+    }
+}
+
+fn tag_5(context: &mut Context) {
     let c = context.c;
     if c == GT {
         context.current_function = tag_0;
     } else if c == SLASH {
         context.parser.end_slash();
+        context.current_function = series_space;
+        context.next_function = tag_4;
     } else {
-        context.current_function = attribute_1;
+        context.current_function = attribute_0;
+        attribute_0(context);
+    }
+}
+
+fn attribute_0(context: &mut Context) {
+    let c = context.c;
+    if c == GT {
+        context.attribute();
+        context.current_function = tag_0;
+    } else if c == SPACE {
+        context.current_function = series_space;
+        context.next_function = attribute_1;
+    } else if c == EQUAL {
         attribute_1(context);
+    } else {
+        context.temporary_attr.0.push(c);
     }
 }
 
 fn attribute_1(context: &mut Context) {
+    let c = context.c;
+    if c == EQUAL {
+        context.current_function = series_space;
+        context.next_function = attribute_2;
+    } else {
+        context.attribute();
+        context.current_function = attribute_0;
+        attribute_0(context);
+    }
+}
+
+fn attribute_2(context: &mut Context) {
     let c = context.c;
     if c == GT {
         context.attribute();
@@ -163,23 +243,16 @@ fn attribute_1(context: &mut Context) {
     } else if c == SPACE {
         context.attribute();
         context.current_function = series_space;
-        context.next_function = attribute_2;
+        context.next_function = tag_5;
+    } else if c == QUOTATION {
+        context.current_function = attribute_4;
+    } else if c == APOSTROPHE {
+        context.current_function = attribute_5;
     } else if c == EQUAL {
-        context.current_function = series_space;
-        context.next_function = attribute_3;
+        context.temporary_attr.1.push(c);
     } else {
-        context.temporary_attr.0.push(c);
-    }
-}
-
-fn attribute_2(context: &mut Context) {
-    let c = context.c;
-    if c == EQUAL {
-        context.current_function = series_space;
-        context.next_function = attribute_3;
-    } else {
-        context.current_function = attribute_1;
-        attribute_1(context);
+        context.current_function = attribute_3;
+        attribute_3(context);
     }
 }
 
@@ -191,20 +264,52 @@ fn attribute_3(context: &mut Context) {
     } else if c == SPACE {
         context.attribute();
         context.current_function = series_space;
-        context.next_function = attribute_0;
-    } else if is_quotation(c) {
-        context.current_function = tag_attribute_4;
+        context.next_function = tag_5;
+    } else if c == EQUAL {
+        context.attribute_push();
     } else {
         context.temporary_attr.1.push(c);
     }
 }
 
-fn tag_attribute_4(context: &mut Context) {
+fn attribute_4(context: &mut Context) {
     let c = context.c;
-    if is_quotation(c) {
+    if c == QUOTATION {
         context.attribute();
         context.current_function = series_space;
-        context.next_function = attribute_0;
+        context.next_function = tag_5;
+    } else {
+        attribute_6(context);
+    }
+}
+
+fn attribute_5(context: &mut Context) {
+    let c = context.c;
+    if c == APOSTROPHE {
+        context.attribute();
+        context.current_function = series_space;
+        context.next_function = tag_5;
+    } else {
+        attribute_6(context);
+    }
+}
+
+fn attribute_6(context: &mut Context) {
+    let c = context.c;
+    if c == GT {
+        let v = context.temporary_attr.1.trim_end();
+        if v.ends_with(SLASH) {
+            context.temporary_attr.1.truncate(v.len() - 1);
+            context.attribute();
+            context.parser.end_slash();
+        } else {
+            context.attribute();
+        }
+        context.current_function = tag_0;
+    } else if c == AMPERSAND {
+        context.next_function = context.current_function;
+        context.current_function = escaping;
+        escaping(context);
     } else {
         context.temporary_attr.1.push(c);
     }
