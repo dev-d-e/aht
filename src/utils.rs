@@ -1,4 +1,3 @@
-use skia_safe::{Font, FontMgr, FontStyle};
 use std::str::FromStr;
 
 pub(crate) mod ascii {
@@ -19,7 +18,7 @@ pub(crate) mod ascii {
     //'"'
     pub(crate) const QUOTATION: char = '"';
     //'''
-    pub(crate) const S_QUOTATION: char = '\'';
+    pub(crate) const APOSTROPHE: char = '\'';
     //','
     pub(crate) const COMMA: char = ',';
     //'['
@@ -28,18 +27,10 @@ pub(crate) mod ascii {
     pub(crate) const RIGHT_SQUARE_BRACKET: char = ']';
     //'%'
     pub(crate) const PER_CENT: char = '%';
-}
-
-pub(crate) mod color {
-    use skia_safe::Color;
-
-    pub(crate) const BG_COLOR: Color = Color::from_rgb(255, 255, 255);
-
-    pub(crate) const BORDER_COLOR: Color = Color::from_rgb(100, 100, 100);
-
-    pub(crate) const FONT_COLOR: Color = Color::from_rgb(0, 0, 0);
-
-    pub(crate) const SURFACE_COLOR: Color = Color::from_rgb(200, 200, 200);
+    //'&'
+    pub(crate) const AMPERSAND: char = '&';
+    //';'
+    pub(crate) const SEMICOLON: char = ';';
 }
 
 pub(crate) fn to_bool(s: &str) -> bool {
@@ -71,17 +62,6 @@ pub(crate) fn to_isize(s: &str) -> Option<isize> {
             println!("to_isize({:?}) {:?}", s, e);
             None
         }
-    }
-}
-
-pub fn get_font(s: &str) -> Option<Font> {
-    let style = FontStyle::normal();
-    let fm = FontMgr::new();
-    if let Some(tf) = fm.match_family_style(s, style) {
-        let font = Font::from_typeface(tf, None);
-        Some(font)
-    } else {
-        None
     }
 }
 
