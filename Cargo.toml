@@ -10,7 +10,7 @@ skia-safe = "*"
 time = "*"
 lightningcss = "*"
 v8 = { version = "*", optional = true }
-ffmpeg-next = { version = "*", optional = true }
+ffmpeg-next = { version = "*" }
 
 [features]
 default = []
