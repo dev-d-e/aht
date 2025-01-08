@@ -7,7 +7,6 @@ use crate::parts::{Coord2D, Distance, Ordinal, Points, RectSide};
 use crate::utils::*;
 use skia_safe::Canvas;
 use std::collections::{HashMap, VecDeque};
-use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 
@@ -561,7 +560,19 @@ impl std::fmt::Debug for Element {
             .field("text", &self.text)
             .field("attribute", &self.attribute)
             .field("subset", &self.subset)
-            .field("upper", &self.upper.as_ref().map(|o| Arc::as_ptr(o)))
+            .field("upper", &self.upper.is_some())
+            .finish()
+    }
+}
+
+impl std::fmt::Display for Element {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Element")
+            .field("mark_type", &self.mark_type)
+            .field("text", &self.text)
+            .field("attribute", &!self.attribute.is_empty())
+            .field("subset", &!self.subset.is_empty())
+            .field("upper", &self.upper.is_some())
             .finish()
     }
 }
@@ -703,7 +714,6 @@ impl Element {
 //------------------------------------------------------------------------------------------
 
 ///Represents page.
-#[derive(Debug)]
 pub struct Page {
     root: Element,
     head_element: Arc<RwLock<Element>>,
@@ -716,6 +726,18 @@ pub struct Page {
     script: Script,
     pub(crate) cursor: VisionAction,
     pub(crate) keyboard_input: Option<Arc<RwLock<String>>>,
+}
+
+impl std::fmt::Debug for Page {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Page")
+            .field("root", &self.root)
+            .field("head", &self.head)
+            .field("body", &self.body)
+            .field("style", &self.style)
+            .field("script", &self.script)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Page {
