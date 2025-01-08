@@ -15,7 +15,7 @@
 mod macros;
 pub mod content;
 pub mod global;
-pub mod grid;
+mod grid;
 mod head;
 pub mod markup;
 mod metadata;
