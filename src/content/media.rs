@@ -1,7 +1,7 @@
-use super::{Border, DrawUnitWrapper, OutPainter};
-use crate::grid::{AlignPattern, Painter, Range, ScrollBar};
+use super::*;
+use crate::grid::AlignPattern;
 use crate::markup::Page;
-use skia_safe::Canvas;
+use skia_safe::{Canvas, EncodedImageFormat, Image};
 
 ///"Audio" represents audio stream.
 #[derive(Debug)]
@@ -32,6 +32,7 @@ pub(crate) struct Img {
     align_pattern: AlignPattern,
     outside: Box<dyn OutPainter>,
     scroll_bar: ScrollBar,
+    buffer: Option<Image>,
 }
 
 impl Img {
@@ -41,6 +42,7 @@ impl Img {
             align_pattern: AlignPattern::center_middle(),
             outside: Box::new(Border::new()),
             scroll_bar: ScrollBar::new(),
+            buffer: None,
         }
     }
 
@@ -49,6 +51,20 @@ impl Img {
 
         self.outside.as_mut().act(&r, canvas);
         self.background.as_mut().act(&r, canvas);
+
+        if self.buffer.is_none() {
+            if let Ok(_) = wrapper.element.read() {
+                let o = Vec::new();
+                if let Some(i) =
+                    get_image(&r.side, canvas, EncodedImageFormat::JPEG, &mut o.as_slice())
+                {
+                    self.buffer.replace(i);
+                }
+            }
+        }
+        if let Some(i) = &self.buffer {
+            canvas.draw_image(i, r.pos.clone(), None);
+        }
     }
 }
 
