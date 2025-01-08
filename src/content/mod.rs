@@ -3,10 +3,10 @@ mod form;
 mod media;
 mod other;
 
-use crate::grid::{AlignPattern, DrawUnit, Grid, Painter, Range, ScrollBar, Sides};
+use crate::grid::{AlignPattern, DrawUnit, Grid, Sides};
 use crate::markup::{AttrName, Attribute, Element, Mark, Page, VisionActionResult};
-use crate::parts::{Coord, FixedRect, Ordinal};
-pub use common::*;
+use crate::parts::{Coord, Coord2D, FixedRect, Ordinal};
+use common::*;
 pub(crate) use form::{Button, Form, Inp, Opt, Pt, Select, Time};
 pub(crate) use media::{Audio, Img, Video};
 pub(crate) use other::{Canv, Iframe};
@@ -30,15 +30,15 @@ impl std::fmt::Debug for Body {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut f = f.debug_struct("Body");
         if let Ok(o) = self.element.try_read() {
-            f.field("element", &o);
+            f.field("element", &o.to_string());
         }
-        f.field("subset", &self.subset)
-            .field("zero", &self.zero)
+        f.field("zero", &self.zero)
             .field("side", &self.side)
             .field("background", &self.background)
             .field("align_pattern", &self.align_pattern)
             .field("grid", &self.grid)
             .field("scroll_bar", &self.scroll_bar)
+            .field("subset", &self.subset)
             .finish()
     }
 }
@@ -68,12 +68,10 @@ impl Body {
     zero!();
 
     pub(crate) fn resize(&mut self, w: isize, h: isize) {
-        self.side.width = w;
-        self.side.height = h;
-        self.side.effect.width = w;
-        self.side.effect.height = h;
+        self.side.reserve(w, h);
         if let Ok(e) = self.element.read() {
-            grid_resize(&e, &mut self.side, &self.zero, &mut self.grid);
+            self.side.get_attr(&e);
+            self.grid.get_attr(&e, self.side.effect(), &self.zero);
         }
         self.subset.resize(&mut self.grid);
     }
@@ -109,25 +107,6 @@ fn renew_subset(element: &Arc<RwLock<Element>>, subset: &mut DrawUnitWrapperHold
                 subset.push(d)
             }
         }
-    }
-}
-
-fn side_resize(e: &Element, side: &mut Sides) {
-    if let Some(Attribute::WIDTH(a)) = e.attribute.get(&AttrName::WIDTH) {
-        side.effect.width = a.get(side.width);
-    }
-    if let Some(Attribute::HEIGHT(a)) = e.attribute.get(&AttrName::HEIGHT) {
-        side.effect.height = a.get(side.height);
-    }
-}
-
-fn grid_resize(e: &Element, side: &mut Sides, zero: &Coord, grid: &mut Grid) {
-    side_resize(e, side);
-    if let Some(Attribute::COLUMN(a)) = e.attribute.get(&AttrName::COLUMN) {
-        grid.x(&a, &side.effect, zero);
-    }
-    if let Some(Attribute::ROW(a)) = e.attribute.get(&AttrName::ROW) {
-        grid.y(&a, &side.effect, zero)
     }
 }
 
@@ -167,7 +146,12 @@ fn subset_draw(
     canvas: &Canvas,
 ) {
     if let Some(mut surface) = unsafe { canvas.surface() } {
-        let s = subset.right_bottom().away_from(&r.pos);
+        let right_bottom = if let Some(right_bottom) = subset.right_bottom() {
+            right_bottom
+        } else {
+            return;
+        };
+        let s = right_bottom.away_from(&r.pos);
 
         if let Some((c, VisionActionResult::PressSweep(a))) = page.cursor.analyse() {
             scroll_bar.cursor_move(c, &a);
@@ -210,14 +194,14 @@ impl std::fmt::Debug for DrawUnitWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut f = f.debug_struct("DrawUnitWrapper");
         if let Ok(o) = self.element.try_read() {
-            f.field("element", &o);
+            f.field("element", &o.to_string());
         }
-        f.field("draw_unit", &self.draw_unit)
-            .field("subset", &self.subset)
-            .field("cursor", &self.cursor)
+        f.field("cursor", &self.cursor)
             .field("zero", &self.zero)
             .field("side", &self.side)
             .field("hidden", &self.hidden)
+            .field("draw_unit", &self.draw_unit)
+            .field("subset", &self.subset)
             .finish()
     }
 }
@@ -248,7 +232,7 @@ impl DrawUnitWrapper {
     }
 
     fn is_empty(&self) -> bool {
-        self.side.effect.is_empty()
+        self.side.effect().is_empty()
     }
 
     fn resize_subset(&mut self) {
@@ -269,16 +253,38 @@ impl DrawUnitWrapper {
             };
             if let Some(r) = xy.next(&a) {
                 self.zero.from_2d(&r.pos);
-                self.side.value_with(&r.side);
+                self.side.replace(&r.side);
             } else {
                 self.hidden = true;
             }
             if let DrawUnit::AREA(o) = &mut self.draw_unit {
-                grid_resize(&e, &mut self.side, &self.zero, &mut o.grid);
+                self.side.get_attr(&e);
+                o.grid.get_attr(&e, self.side.effect(), &self.zero);
             }
         }
         if !self.hidden {
             self.resize_subset();
+        }
+    }
+
+    pub(crate) fn right_bottom(&self) -> Option<Coord2D> {
+        if self.hidden {
+            return None;
+        }
+        match &self.draw_unit {
+            DrawUnit::AREA(_)
+            | DrawUnit::AUDIO(_)
+            | DrawUnit::BUTTON(_)
+            | DrawUnit::CANVAS(_)
+            | DrawUnit::IFRAME(_)
+            | DrawUnit::IMG(_)
+            | DrawUnit::VIDEO(_) => Some(self.zero.move_rect_to_2d(self.side.effect())),
+            DrawUnit::INP(o) => Some(o.right_bottom()),
+            DrawUnit::OPTION(_) => None,
+            DrawUnit::PT(o) => Some(o.right_bottom()),
+            DrawUnit::SELECT(o) => Some(o.right_bottom()),
+            DrawUnit::TIME(o) => Some(o.right_bottom()),
+            _ => None,
         }
     }
 
@@ -383,6 +389,25 @@ impl DrawUnitWrapperHolder {
         for i in self.0.iter_mut() {
             i.resize_grid(xy);
         }
+    }
+
+    pub(crate) fn right_bottom(&self) -> Option<Coord2D> {
+        let mut c: Option<Coord2D> = None;
+        for i in self.0.iter() {
+            if let Some(r) = i.right_bottom() {
+                if let Some(c) = c.as_mut() {
+                    if c.x < r.x {
+                        c.x = r.x;
+                    }
+                    if c.y < r.y {
+                        c.y = r.y;
+                    }
+                } else {
+                    c.replace(r);
+                }
+            }
+        }
+        c
     }
 
     pub(crate) fn pop_cursor(&mut self, page: &mut Page) -> bool {
