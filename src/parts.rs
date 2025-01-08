@@ -35,6 +35,13 @@ impl Coord {
             y: self.y,
         }
     }
+
+    pub(crate) fn move_rect_to_2d(&self, r: &RectSide) -> Coord2D {
+        Coord2D {
+            x: self.x + r.width,
+            y: self.y + r.height,
+        }
+    }
 }
 
 ///two-dimensional coordinate.
@@ -385,6 +392,22 @@ impl RectSide {
             width: self.width * r.width / r2.width,
             height: self.height * r.height / r2.height,
         }
+    }
+
+    pub(crate) fn replace(&mut self, r: &Self) {
+        self.width = r.width;
+        self.height = r.height;
+    }
+
+    pub(crate) fn to_rect(&self, zero: &Coord) -> FixedRect {
+        FixedRect {
+            pos: zero.to_2d(),
+            side: self.clone(),
+        }
+    }
+
+    pub(crate) fn to_isize(&self) -> ISize {
+        ISize::new(self.width as i32, self.height as i32)
     }
 }
 
