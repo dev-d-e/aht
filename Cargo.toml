@@ -11,6 +11,10 @@ time = "*"
 lightningcss = "*"
 v8 = { version = "*", optional = true }
 ffmpeg-next = { version = "*" }
+bytes = "*"
+
+[target.'cfg(target_os="linux")'.dependencies]
+alsa = "*"
 
 [features]
 default = []
