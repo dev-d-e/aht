@@ -1,4 +1,5 @@
 use crate::global::*;
+use crate::imagesound::{build, ImageDataReceiver};
 use crate::parts::{Coord2D, FixedRect, LineSegment, RectSide};
 use skia_safe::codec::{gif_decoder, jpeg_decoder, png_decoder, webp_decoder};
 use skia_safe::codecs::Decoder;
@@ -316,5 +317,47 @@ fn get_decoder(f: EncodedImageFormat) -> Option<Decoder> {
         EncodedImageFormat::PNG => Some(png_decoder::decoder()),
         EncodedImageFormat::WEBP => Some(webp_decoder::decoder()),
         _ => None,
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct VideoReader {
+    result: ImageDataReceiver,
+}
+
+impl VideoReader {
+    pub(super) fn new(s: &str) -> Self {
+        let receiver = build(s.to_string());
+        Self { result: receiver }
+    }
+
+    pub(super) fn time(&mut self, n: i64) {
+        self.result.ctrl_seek(n);
+    }
+
+    pub(super) fn act(&mut self, rect: &FixedRect, canvas: &Canvas) {
+        if let Some(i) = self.result.data(canvas.image_info(), &rect.side) {
+            canvas.draw_image(i, rect.pos.clone(), None);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct AudioReader {
+    result: ImageDataReceiver,
+}
+
+impl AudioReader {
+    pub(super) fn new(s: &str) -> Self {
+        let receiver = build(s.to_string());
+        Self { result: receiver }
+    }
+
+    pub(super) fn time(&mut self, n: i64) {
+        self.result.ctrl_seek(n);
+    }
+
+    pub(super) fn act(&mut self, rect: &FixedRect, canvas: &Canvas) {
+        self.result.none();
     }
 }
