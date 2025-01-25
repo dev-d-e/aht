@@ -8,6 +8,7 @@ use skia_safe::{Canvas, EncodedImageFormat, Image};
 pub(crate) struct Audio {
     background: Box<dyn Painter>,
     align_pattern: AlignPattern,
+    reader: Option<AudioReader>,
 }
 
 impl Audio {
@@ -15,6 +16,7 @@ impl Audio {
         Self {
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::center_middle(),
+            reader: None,
         }
     }
 
@@ -22,6 +24,15 @@ impl Audio {
         let r = wrapper.rect();
 
         self.background.as_mut().act(&r, canvas);
+
+        if self.reader.is_none() {
+            if let Ok(e) = wrapper.element.read() {
+                self.reader.replace(AudioReader::new(&e.text));
+            }
+        }
+        if let Some(o) = &mut self.reader {
+            o.act(&r, canvas);
+        }
     }
 }
 
@@ -73,6 +84,7 @@ impl Img {
 pub(crate) struct Video {
     background: Box<dyn Painter>,
     align_pattern: AlignPattern,
+    reader: Option<VideoReader>,
 }
 
 impl Video {
@@ -80,6 +92,7 @@ impl Video {
         Self {
             background: Box::new(Range::new()),
             align_pattern: AlignPattern::center_middle(),
+            reader: None,
         }
     }
 
@@ -87,5 +100,14 @@ impl Video {
         let r = wrapper.rect();
 
         self.background.as_mut().act(&r, canvas);
+
+        if self.reader.is_none() {
+            if let Ok(e) = wrapper.element.read() {
+                self.reader.replace(VideoReader::new(&e.text));
+            }
+        }
+        if let Some(o) = &mut self.reader {
+            o.act(&r, canvas);
+        }
     }
 }
