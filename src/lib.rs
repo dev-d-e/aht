@@ -17,6 +17,7 @@ pub mod content;
 pub mod global;
 mod grid;
 mod head;
+mod imagesound;
 pub mod markup;
 mod metadata;
 pub mod parts;
