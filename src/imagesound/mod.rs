@@ -1,10 +1,10 @@
 use crate::parts::RectSide;
+use bssf::*;
 use bytes::Bytes;
 use ffmpeg_next::codec::context::Context;
 use ffmpeg_next::decoder::{Audio, Video};
 use ffmpeg_next::ffi::*;
 use ffmpeg_next::format::context::Input;
-use ffmpeg_next::format::sample::Type as SampleType;
 use ffmpeg_next::format::{input, Pixel, Sample};
 use ffmpeg_next::frame::{Audio as AudioFrame, Video as VideoFrame};
 use ffmpeg_next::media::Type as MediaType;
@@ -208,6 +208,18 @@ impl SoundData {
     }
 }
 
+impl From<Box<[u8]>> for SoundData {
+    fn from(o: Box<[u8]>) -> Self {
+        Self::new(Bytes::from(o))
+    }
+}
+
+impl From<Vec<u8>> for SoundData {
+    fn from(o: Vec<u8>) -> Self {
+        Self::new(Bytes::from(o))
+    }
+}
+
 enum SoundDataWrapper {
     Data(SoundData),
     Pause(bool),
@@ -248,6 +260,55 @@ impl SoundDataReceiver {
     }
 }
 
+macro_rules! audio_data {
+    ($f:ident , $a:ident $(, $o:expr )+) => {{
+        match $a.format() {
+            Sample::None | Sample::U8(_) => {
+                let k = $f($($a.data($o),)*);
+                return Some(k.into());
+            }
+            Sample::I16(_) => {
+                let k = $f::<i16>($($a.plane($o),)*);
+                return Some(k.into());
+            }
+            Sample::I32(_) => {
+                let k = $f::<i32>($($a.plane($o),)*);
+                return Some(k.into());
+            }
+            Sample::I64(_) => {
+                let k = $f::<i32>($($a.plane($o),)*);
+                return Some(k.into());
+            }
+            Sample::F32(_) => {
+                let k = $f::<f32>($($a.plane($o),)*);
+                return Some(k.into());
+            }
+            Sample::F64(_) => {
+                let k = $f::<f64>($($a.plane($o),)*);
+                return Some(k.into());
+            }
+        }
+    }};
+}
+
+//Converts planar data to packed data.
+//Returns a Vec.
+fn audio_frame_to_array(audio_frame: &mut AudioFrame) -> Option<Vec<u8>> {
+    match audio_frame.planes() {
+        1 => {
+            return Some(audio_frame.data(0).into());
+        }
+        2 => audio_data!(build_2, audio_frame, 0, 1),
+        3 => audio_data!(build_3, audio_frame, 0, 1, 2),
+        4 => audio_data!(build_4, audio_frame, 0, 1, 2, 3),
+        5 => audio_data!(build_5, audio_frame, 0, 1, 2, 3, 4),
+        6 => audio_data!(build_6, audio_frame, 0, 1, 2, 3, 4, 5),
+        7 => audio_data!(build_7, audio_frame, 0, 1, 2, 3, 4, 5, 6),
+        8 => audio_data!(build_8, audio_frame, 0, 1, 2, 3, 4, 5, 6, 7),
+        _ => None,
+    }
+}
+
 struct AudioConsumer {
     decoder: Audio,
     swr_context: Option<SwrContext>,
@@ -272,38 +333,17 @@ impl AudioConsumer {
             }
         });
 
-        let mut swr_context = None;
-        match decoder.resampler(
-            Sample::F32(SampleType::Packed),
-            decoder.channel_layout(),
-            decoder.rate(),
-        ) {
-            Ok(s) => {
-                swr_context.replace(s);
-            }
-            Err(e) => {
-                println!("{:?}", e);
-            }
-        }
         Self {
             decoder,
-            swr_context,
+            swr_context: None,
             sender,
             sound_thread,
         }
     }
 
     fn audio_frame(&mut self, audio_frame: &mut AudioFrame) {
-        if audio_frame.is_planar() {
-            if let Some(s) = &mut self.swr_context {
-                let mut out = AudioFrame::empty();
-                let _ = s.run(audio_frame, &mut out);
-                let dat = out.data(0);
-                self.sender.send(SoundData::from_slice(dat));
-            }
-        } else {
-            let dat = audio_frame.data(0);
-            self.sender.send(SoundData::from_slice(dat));
+        if let Some(k) = audio_frame_to_array(audio_frame) {
+            self.sender.send(SoundData::from(k));
         }
     }
 
