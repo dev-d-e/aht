@@ -11,6 +11,7 @@ time = "*"
 lightningcss = "*"
 v8 = { version = "*", optional = true }
 ffmpeg-next = { version = "*" }
+bssf = { version = "*", git = "https://github.com/dev-d-e/bssf.git" }
 bytes = "*"
 
 [target.'cfg(target_os="linux")'.dependencies]
