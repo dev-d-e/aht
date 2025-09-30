@@ -24,6 +24,19 @@ impl Coord {
         Self { x, y, z: 0 }
     }
 
+    pub fn from_str(s: &str) -> Option<Self> {
+        if s.is_empty() {
+            return None;
+        }
+        let v: Vec<isize> = s.split(COMMA).filter_map(|o| to_isize(o)).collect();
+        match v.len() {
+            1 => Some(Self::xy(v[0], 0)),
+            2 => Some(Self::xy(v[0], v[1])),
+            3 => Some(Self::xyz(v[0], v[1], v[2])),
+            _ => None,
+        }
+    }
+
     pub(crate) fn from_2d(&mut self, c: &Coord2D) {
         self.x = c.x;
         self.y = c.y
@@ -41,6 +54,10 @@ impl Coord {
             x: self.x + r.width,
             y: self.y + r.height,
         }
+    }
+
+    pub fn to_string(&self) -> String {
+        format!("{},{},{}", self.x, self.y, self.z)
     }
 }
 
@@ -550,6 +567,29 @@ impl Chronograph {
 
     pub(crate) fn refresh(&mut self) {
         self.t = Instant::now();
+    }
+}
+
+const JS: &str = "text/javascript";
+
+///ScriptType.
+#[derive(Debug)]
+pub enum ScriptType {
+    JS,
+}
+
+impl ScriptType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            JS => Some(Self::JS),
+            _ => None,
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::JS => JS.to_string(),
+        }
     }
 }
 
