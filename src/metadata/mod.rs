@@ -1,4 +1,4 @@
-use crate::markup::{Element, Page};
+use crate::markup::{AttrName, Attribute, Element, Page};
 use crate::script::ScriptRuntime;
 use crate::style::StyleContext;
 use std::sync::{Arc, RwLock};
@@ -13,7 +13,7 @@ impl std::fmt::Debug for Style {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut f = f.debug_struct("Style");
         if let Ok(o) = self.element.try_read() {
-            f.field("element", &o);
+            f.field("element", &o.to_string());
         }
         f.finish()
     }
@@ -47,7 +47,7 @@ impl std::fmt::Debug for Script {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut f = f.debug_struct("Script");
         if let Ok(o) = self.element.try_read() {
-            f.field("element", &o);
+            f.field("element", &o.to_string());
         }
         f.finish()
     }
@@ -66,7 +66,9 @@ impl Script {
             if e.text.is_empty() {
                 return;
             }
-            self.script_rt.run(&e.text, page)
+            if let Some(Attribute::TYPE(t)) = e.attribute.get(&AttrName::TYPE) {
+                self.script_rt.run(&e.text, &t, page)
+            }
         }
     }
 }
