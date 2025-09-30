@@ -3,7 +3,7 @@ mod format;
 use crate::content::Body;
 use crate::head::Head;
 use crate::metadata::{Script, Style};
-use crate::parts::{Coord2D, Distance, Ordinal, Points, RectSide};
+use crate::parts::*;
 use crate::utils::*;
 use skia_safe::Canvas;
 use std::collections::{HashMap, VecDeque};
@@ -121,12 +121,14 @@ const METHOD: &str = "method";
 const MULTIPLE: &str = "multiple";
 const NAME: &str = "name";
 const ORDINAL: &str = "ordinal";
+const POSITION: &str = "position";
 const READONLY: &str = "readonly";
 const REQUIRED: &str = "required";
 const ROW: &str = "row";
 const SELECTED: &str = "selected";
 const SRC: &str = "src";
 const TIP: &str = "tip";
+const TYPE: &str = "type";
 const VALUE: &str = "value";
 const WIDTH: &str = "width";
 
@@ -159,12 +161,14 @@ pub enum AttrName {
     MULTIPLE,
     NAME,
     ORDINAL,
+    POSITION,
     READONLY,
     REQUIRED,
     ROW,
     SELECTED,
     SRC,
     TIP,
+    TYPE,
     VALUE,
     WIDTH,
     ONABORT,
@@ -198,12 +202,14 @@ impl AttrName {
             AttrName::MULTIPLE => MULTIPLE,
             AttrName::NAME => NAME,
             AttrName::ORDINAL => ORDINAL,
+            AttrName::POSITION => POSITION,
             AttrName::READONLY => READONLY,
             AttrName::REQUIRED => REQUIRED,
             AttrName::ROW => ROW,
             AttrName::SELECTED => SELECTED,
             AttrName::SRC => SRC,
             AttrName::TIP => TIP,
+            AttrName::TYPE => TYPE,
             AttrName::VALUE => VALUE,
             AttrName::WIDTH => WIDTH,
             AttrName::ONABORT => ONABORT,
@@ -217,6 +223,47 @@ impl AttrName {
             AttrName::ONLOAD => ONLOAD,
             AttrName::ONRESIZE => ONRESIZE,
             AttrName::ONSCROLL => ONSCROLL,
+        }
+    }
+
+    ///Converts from a string slice.
+    pub fn from(s: &str) -> Option<Self> {
+        match s {
+            ACTION => Some(Self::ACTION),
+            CLASS => Some(Self::CLASS),
+            COLUMN => Some(Self::COLUMN),
+            DISABLED => Some(Self::DISABLED),
+            ENCTYPE => Some(Self::ENCTYPE),
+            HEIGHT => Some(Self::HEIGHT),
+            HIDDEN => Some(Self::HIDDEN),
+            HREF => Some(Self::HREF),
+            ID => Some(Self::ID),
+            LANG => Some(Self::LANG),
+            METHOD => Some(Self::METHOD),
+            MULTIPLE => Some(Self::MULTIPLE),
+            NAME => Some(Self::NAME),
+            ORDINAL => Some(Self::ORDINAL),
+            READONLY => Some(Self::READONLY),
+            REQUIRED => Some(Self::REQUIRED),
+            ROW => Some(Self::ROW),
+            SELECTED => Some(Self::SELECTED),
+            SRC => Some(Self::SRC),
+            TIP => Some(Self::TIP),
+            TYPE => Some(Self::TYPE),
+            VALUE => Some(Self::VALUE),
+            WIDTH => Some(Self::WIDTH),
+            ONABORT => Some(Self::ONABORT),
+            ONBLUR => Some(Self::ONBLUR),
+            ONCANCEL => Some(Self::ONCANCEL),
+            ONCHANGE => Some(Self::ONCHANGE),
+            ONCLICK => Some(Self::ONCLICK),
+            ONCLOSE => Some(Self::ONCLOSE),
+            ONFOCUS => Some(Self::ONFOCUS),
+            ONINVALID => Some(Self::ONINVALID),
+            ONLOAD => Some(Self::ONLOAD),
+            ONRESIZE => Some(Self::ONRESIZE),
+            ONSCROLL => Some(Self::ONSCROLL),
+            _ => None,
         }
     }
 }
@@ -238,12 +285,14 @@ pub enum Attribute {
     MULTIPLE(bool),
     NAME(String),
     ORDINAL(Ordinal),
+    POSITION(Coord),
     READONLY(bool),
     REQUIRED(bool),
     ROW(Points),
     SELECTED(bool),
     SRC(String),
     TIP(String),
+    TYPE(ScriptType),
     VALUE(String),
     WIDTH(Distance),
     ONABORT(String),
@@ -322,6 +371,13 @@ impl Attribute {
                 Some(s) => Ok(Self::ORDINAL(Ordinal::from_str(&s))),
                 None => Err(s),
             },
+            POSITION => match s {
+                Some(s) => match Coord::from_str(&s) {
+                    Some(c) => Ok(Self::POSITION(c)),
+                    None => Err(Some(s)),
+                },
+                None => Err(s),
+            },
             READONLY => match s {
                 Some(s) => Ok(Self::READONLY(to_bool(&s))),
                 None => Ok(Self::READONLY(true)),
@@ -344,6 +400,13 @@ impl Attribute {
             },
             TIP => match s {
                 Some(s) => Ok(Self::TIP(s)),
+                None => Err(s),
+            },
+            TYPE => match s {
+                Some(s) => match ScriptType::from_str(&s) {
+                    Some(t) => Ok(Self::TYPE(t)),
+                    None => Err(Some(s)),
+                },
                 None => Err(s),
             },
             VALUE => match s {
@@ -421,12 +484,14 @@ impl Attribute {
             Self::MULTIPLE(_) => AttrName::MULTIPLE,
             Self::NAME(_) => AttrName::NAME,
             Self::ORDINAL(_) => AttrName::ORDINAL,
+            Self::POSITION(_) => AttrName::POSITION,
             Self::READONLY(_) => AttrName::READONLY,
             Self::REQUIRED(_) => AttrName::REQUIRED,
             Self::ROW(_) => AttrName::ROW,
             Self::SELECTED(_) => AttrName::SELECTED,
             Self::SRC(_) => AttrName::SRC,
             Self::TIP(_) => AttrName::TIP,
+            Self::TYPE(_) => AttrName::TYPE,
             Self::VALUE(_) => AttrName::VALUE,
             Self::WIDTH(_) => AttrName::WIDTH,
             Self::ONABORT(_) => AttrName::ONABORT,
@@ -459,12 +524,14 @@ impl Attribute {
             Attribute::MULTIPLE(s) => s.to_string(),
             Attribute::NAME(s) => s.to_string(),
             Attribute::ORDINAL(s) => s.to_string(),
+            Attribute::POSITION(s) => s.to_string(),
             Attribute::READONLY(s) => s.to_string(),
             Attribute::REQUIRED(s) => s.to_string(),
             Attribute::ROW(s) => s.to_string(),
             Attribute::SELECTED(s) => s.to_string(),
             Attribute::SRC(s) => s.to_string(),
             Attribute::TIP(s) => s.to_string(),
+            Attribute::TYPE(s) => s.to_string(),
             Attribute::VALUE(s) => s.to_string(),
             Attribute::WIDTH(s) => s.to_string(),
             Attribute::ONABORT(s) => s.to_string(),
