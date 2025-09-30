@@ -1,5 +1,7 @@
 //!It's another hypertext format to describe GUI for native application.
 //!
+//!The components build on plane rectangular coordinates.
+//!
 //!```
 //!use aht::markup::{Element, Page};
 //!
@@ -9,12 +11,13 @@
 //!```
 //!
 
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports, unused_variables)]
 
 #[macro_use]
 mod macros;
 pub mod content;
 pub mod global;
+mod gpu;
 mod grid;
 mod head;
 mod imagesound;
