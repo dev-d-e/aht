@@ -2,6 +2,8 @@
 
 It's another hypertext format to describe GUI for native application.
 
+The components build on plane rectangular coordinates.
+
 ## Usage
 
 ```
@@ -30,11 +32,11 @@ Page::from_str(&s);
  
 * "head" element is a collection of metadata for the document.There is only one "head" element in conforming documents.
 
-* "body" element is grid layout. There is only one "body" element in conforming documents.
+* "body" element is grid/coordinates layout. There is only one "body" element in conforming documents.
 
 set "column" attribute and "row" attribute with number or points or segments, child elements can be located in body.
 
-* "area" element is grid layout. it has "class","id","width","height","column","row"... attributes.
+* "area" element is grid/coordinates layout. it has "class","id","width","height","column","row"... attributes.
 
 "class" attribute value has a set of space-separated tokens representing the various classes that the element belongs to.
 
