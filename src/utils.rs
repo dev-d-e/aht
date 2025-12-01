@@ -1,4 +1,7 @@
+use crate::error::*;
+pub(crate) use log::{debug, error, info, trace, warn};
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 
 pub(crate) mod ascii {
     //'<'
@@ -33,39 +36,124 @@ pub(crate) mod ascii {
     pub(crate) const SEMICOLON: char = ';';
 }
 
-pub(crate) fn to_bool(s: &str) -> bool {
-    bool::from_str(s.trim()).unwrap_or(false)
+#[inline(always)]
+pub(crate) fn to_bool(s: &str) -> Result<bool> {
+    bool::from_str(s).map_err(|e| e.into())
 }
 
-pub(crate) fn to_usize(s: &str) -> Option<usize> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    match usize::from_str_radix(s, 10) {
-        Ok(i) => Some(i),
-        Err(e) => {
-            println!("to_usize({:?}) {:?}", s, e);
-            None
-        }
-    }
+#[inline(always)]
+pub(crate) fn to_usize(s: &str) -> Result<usize> {
+    usize::from_str_radix(s, 10).map_err(|e| e.into())
 }
 
-pub(crate) fn to_isize(s: &str) -> Option<isize> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    match isize::from_str_radix(s, 10) {
-        Ok(i) => Some(i),
-        Err(e) => {
-            println!("to_isize({:?}) {:?}", s, e);
-            None
-        }
-    }
+#[inline(always)]
+pub(crate) fn to_isize(s: &str) -> Result<isize> {
+    isize::from_str_radix(s, 10).map_err(|e| e.into())
 }
 
-#[inline]
-pub fn between<T: PartialOrd>(o: T, min: T, max: T) -> bool {
+#[inline(always)]
+pub(crate) fn to_f32(s: &str) -> Result<f32> {
+    f32::from_str(s).map_err(|e| e.into())
+}
+
+#[inline(always)]
+pub(crate) fn between<T: PartialOrd>(o: T, min: T, max: T) -> bool {
     o >= min && o <= max
+}
+
+#[derive(Debug)]
+pub(crate) struct Chronograph {
+    t: Instant,
+    n: u64,
+}
+
+impl Chronograph {
+    pub(crate) fn new(n: u64) -> Self {
+        Self {
+            t: Instant::now(),
+            n,
+        }
+    }
+
+    pub(crate) fn elapsed(&self) -> bool {
+        self.t.elapsed() >= Duration::from_millis(self.n)
+    }
+
+    pub(crate) fn refresh(&mut self) {
+        self.t = Instant::now();
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct FpsCtrl {
+    target: f32,
+    duration: Duration,
+    t: Instant,
+}
+
+impl FpsCtrl {
+    pub(crate) fn new(target: f32) -> Self {
+        let duration = Duration::from_secs_f32(1.0 / target);
+        Self {
+            target,
+            duration,
+            t: Instant::now(),
+        }
+    }
+
+    pub(crate) fn need_to_wait(&mut self) -> Option<Instant> {
+        let next_frame_time = self.t + self.duration;
+        let now = Instant::now();
+        if now >= next_frame_time {
+            self.t = now;
+            None
+        } else {
+            Some(next_frame_time)
+        }
+    }
+
+    pub(crate) fn is_next(&mut self) -> bool {
+        self.need_to_wait().is_none()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct FpsCounter {
+    n: u32,
+    t: Instant,
+    r: f32,
+}
+
+impl Default for FpsCounter {
+    fn default() -> Self {
+        Self {
+            n: 0,
+            t: Instant::now(),
+            r: 0.0,
+        }
+    }
+}
+
+impl FpsCounter {
+    pub(crate) fn reset(&mut self) {
+        self.n = 0;
+        self.t = Instant::now();
+    }
+
+    pub(crate) fn count(&mut self) {
+        self.n += 1;
+        let o = self.t.elapsed().as_secs_f32();
+        if o >= 1.0 {
+            self.r = self.n as f32 / o;
+            self.reset();
+        }
+    }
+
+    pub(crate) fn fps(&mut self) -> Option<f32> {
+        if self.r > 0.0 {
+            Some(self.r)
+        } else {
+            None
+        }
+    }
 }
