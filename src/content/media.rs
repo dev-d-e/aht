@@ -1,113 +1,248 @@
 use super::*;
-use crate::grid::AlignPattern;
-use crate::markup::Page;
-use skia_safe::{Canvas, EncodedImageFormat, Image};
+use skia_safe::{EncodedImageFormat, Image};
 
 ///"Audio" represents audio stream.
-#[derive(Debug)]
+#[derive(Getters, MutGetters)]
 pub(crate) struct Audio {
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)")]
+    element: Arc<RwLock<Element>>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
     align_pattern: AlignPattern,
     reader: Option<AudioReader>,
 }
 
+impl std::fmt::Debug for Audio {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Audio");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o.to_string());
+        }
+        f.field("rect", &self.rect)
+            .field("painter", &self.painter)
+            .field("reader", &self.reader.is_some())
+            .finish()
+    }
+}
+
 impl Audio {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            background: Box::new(Range::new()),
+            element,
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: Rectangle {
+                color: *default_surface_color(),
+                ..Default::default()
+            }
+            .into(),
             align_pattern: AlignPattern::center_middle(),
             reader: None,
         }
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
-        let r = wrapper.rect();
+    resize!();
 
-        self.background.as_mut().act(&r, canvas);
+    right_bottom!();
+
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        draw_check!(self);
+
+        self.painter.draw(&self.rect, t);
 
         if self.reader.is_none() {
-            if let Ok(e) = wrapper.element.read() {
-                self.reader.replace(AudioReader::new(&e.text));
+            if let Ok(e) = self.element.read() {
+                self.reader.replace(AudioReader::new(e.text()));
             }
         }
         if let Some(o) = &mut self.reader {
-            o.act(&r, canvas);
+            o.draw(&self.rect, t);
+        }
+    }
+
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match &t.kind {
+            ActionKind::Click(c, _) => {
+                if self.painter.within(&self.rect, c) {
+                    t.finish = true;
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
+            _ => {}
         }
     }
 }
 
 ///"Img" represents an image.
-#[derive(Debug)]
+#[derive(Getters, MutGetters)]
 pub(crate) struct Img {
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)")]
+    element: Arc<RwLock<Element>>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
     align_pattern: AlignPattern,
-    outside: Box<dyn OutPainter>,
     scroll_bar: ScrollBar,
     buffer: Option<Image>,
 }
 
+impl std::fmt::Debug for Img {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Img");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o.to_string());
+        }
+        f.field("rect", &self.rect)
+            .field("painter", &self.painter)
+            .field("buffer", &self.buffer.is_some())
+            .finish()
+    }
+}
+
 impl Img {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            background: Box::new(Range::new()),
+            element,
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: RectangleCurve {
+                color: *default_border_color(),
+                ..Default::default()
+            }
+            .into(),
             align_pattern: AlignPattern::center_middle(),
-            outside: Box::new(Border::new()),
-            scroll_bar: ScrollBar::new(),
+            scroll_bar: Default::default(),
             buffer: None,
         }
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
-        let r = wrapper.rect();
+    resize!();
 
-        self.outside.as_mut().act(&r, canvas);
-        self.background.as_mut().act(&r, canvas);
+    right_bottom!();
+
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        draw_check!(self);
+
+        self.painter.draw(&self.rect, t);
 
         if self.buffer.is_none() {
-            if let Ok(_) = wrapper.element.read() {
+            if let Ok(_) = self.element.read() {
                 let o = Vec::new();
-                if let Some(i) =
-                    get_image(&r.side, canvas, EncodedImageFormat::JPEG, &mut o.as_slice())
-                {
+                if let Some(i) = get_image(
+                    self.rect.side(),
+                    t,
+                    EncodedImageFormat::JPEG,
+                    &mut o.as_slice(),
+                ) {
                     self.buffer.replace(i);
                 }
             }
         }
         if let Some(i) = &self.buffer {
-            canvas.draw_image(i, r.pos.clone(), None);
+            t.surface.canvas().draw_image(i, &**self.rect, None);
+        }
+    }
+
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match &t.kind {
+            ActionKind::Click(c, _) => {
+                if self.painter.within(&self.rect, c) {
+                    t.finish = true;
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
+            _ => {}
         }
     }
 }
 
 ///"Video" represents video.
-#[derive(Debug)]
+#[derive(Getters, MutGetters)]
 pub(crate) struct Video {
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)")]
+    element: Arc<RwLock<Element>>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
     align_pattern: AlignPattern,
     reader: Option<VideoReader>,
 }
 
+impl std::fmt::Debug for Video {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Video");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o.to_string());
+        }
+        f.field("rect", &self.rect)
+            .field("painter", &self.painter)
+            .field("reader", &self.reader.is_some())
+            .finish()
+    }
+}
+
 impl Video {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            background: Box::new(Range::new()),
+            element,
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: Rectangle {
+                color: *default_surface_color(),
+            }
+            .into(),
             align_pattern: AlignPattern::center_middle(),
             reader: None,
         }
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
-        let r = wrapper.rect();
+    resize!();
 
-        self.background.as_mut().act(&r, canvas);
+    right_bottom!();
+
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        draw_check!(self);
 
         if self.reader.is_none() {
-            if let Ok(e) = wrapper.element.read() {
-                self.reader.replace(VideoReader::new(&e.text));
+            if let Ok(e) = self.element.read() {
+                self.reader.replace(VideoReader::new(e.text()));
             }
         }
         if let Some(o) = &mut self.reader {
-            o.act(&r, canvas);
+            o.draw(&self.rect, t);
+        } else {
+            self.painter.draw(&self.rect, t);
+        }
+    }
+
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match &t.kind {
+            ActionKind::Click(c, _) => {
+                if self.painter.within(&self.rect, c) {
+                    t.finish = true;
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
+            _ => {}
         }
     }
 }
