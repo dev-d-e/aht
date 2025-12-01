@@ -1,4 +1,6 @@
-use crate::parts::RectSide;
+use crate::error::*;
+use crate::markup::*;
+use crate::utils::*;
 use bssf::*;
 use bytes::Bytes;
 use ffmpeg_next::codec::context::Context;
@@ -11,27 +13,34 @@ use ffmpeg_next::media::Type as MediaType;
 use ffmpeg_next::rescale::TIME_BASE;
 use ffmpeg_next::software::resampling::Context as SwrContext;
 use ffmpeg_next::software::scaling::Context as SwsContext;
-use ffmpeg_next::{Error, Rescale, Stream};
-use skia_safe::{images, ColorType, Data, ISize, Image, ImageInfo, SamplingOptions};
+use ffmpeg_next::{Rescale, Stream};
+use getset::{Getters, MutGetters};
+use skia_safe::{images, ColorType, Data, ISize, Image, ImageInfo, SamplingOptions, Size};
 use std::collections::HashMap;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::thread::JoinHandle;
 
+#[inline(always)]
+fn to_err(e: impl std::error::Error + 'static) -> Error {
+    (ErrorKind::MediaError, e).into()
+}
+
 const BOUND_SIZE: usize = 8;
 const CTRL_SIZE: usize = 1;
+const IMAGE_DATA_FPS: f32 = 24.0;
 
 #[cfg(target_os = "linux")]
 mod linux;
 
 #[derive(Debug)]
 struct ImageData {
-    width: u32,
-    height: u32,
+    width: f32,
+    height: f32,
     bytes: Bytes,
 }
 
 impl ImageData {
-    fn new(width: u32, height: u32, bytes: Bytes) -> Self {
+    fn new(width: f32, height: f32, bytes: Bytes) -> Self {
         Self {
             width,
             height,
@@ -39,8 +48,12 @@ impl ImageData {
         }
     }
 
-    fn from_slice(width: u32, height: u32, buf: &[u8]) -> Self {
+    fn from_slice(width: f32, height: f32, buf: &[u8]) -> Self {
         Self::new(width, height, Bytes::copy_from_slice(buf))
+    }
+
+    fn to_size(&self) -> Size {
+        Size::new(self.width, self.height)
     }
 
     fn to_isize(&self) -> ISize {
@@ -48,7 +61,7 @@ impl ImageData {
     }
 
     fn equals(&self, r: &RectSide) -> bool {
-        self.width as isize == r.width && self.height as isize == r.height
+        self.width == r.width() && self.height == r.height()
     }
 
     fn to_data(&self) -> Data {
@@ -66,7 +79,7 @@ impl ImageData {
         if self.equals(r) {
             Some(i)
         } else {
-            let info = info.with_dimensions(r.to_isize());
+            let info = info.with_dimensions(r);
             i.make_scaled(&info, SamplingOptions::default())
         }
     }
@@ -101,11 +114,13 @@ impl ImageDataSender {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters, MutGetters)]
 pub(crate) struct ImageDataReceiver {
     data: Receiver<ImageData>,
+    #[getset(get = "pub(crate)")]
     buffer: Option<Image>,
     ctrl: SyncSender<ImageCtrl>,
+    fps_ctrl: FpsCtrl,
 }
 
 impl ImageDataReceiver {
@@ -114,6 +129,7 @@ impl ImageDataReceiver {
             data,
             buffer: None,
             ctrl,
+            fps_ctrl: FpsCtrl::new(IMAGE_DATA_FPS),
         }
     }
 
@@ -127,9 +143,11 @@ impl ImageDataReceiver {
     }
 
     pub(crate) fn data(&mut self, image_info: ImageInfo, r: &RectSide) -> &Option<Image> {
-        if let Ok(data) = self.data.try_recv() {
-            if let Some(i) = data.to_image(image_info, r) {
-                self.buffer.replace(i);
+        if self.fps_ctrl.is_next() {
+            if let Ok(data) = self.data.try_recv() {
+                if let Some(i) = data.to_image(image_info, r) {
+                    self.buffer.replace(i);
+                }
             }
         }
         return &self.buffer;
@@ -167,7 +185,7 @@ impl VideoConsumer {
                 sws_context.replace(s);
             }
             Err(e) => {
-                println!("{:?}", e);
+                error!("{e}");
             }
         }
         Self {
@@ -185,7 +203,11 @@ impl VideoConsumer {
             let _ = s.run(video_frame, &mut out);
             let dat = out.data(0);
             if dat.len() > 0 {
-                sender.send(ImageData::from_slice(out.width(), out.height(), dat));
+                sender.send(ImageData::from_slice(
+                    out.width() as f32,
+                    out.height() as f32,
+                    dat,
+                ));
             }
         }
     }
@@ -366,8 +388,8 @@ struct MediaWrapper {
 }
 
 impl MediaWrapper {
-    fn new(p: &str) -> Result<Self, Error> {
-        input(p).map(|input| Self {
+    fn new(p: &str) -> Result<Self> {
+        input(p).map_err(|e| to_err(e)).map(|input| Self {
             input,
             map: HashMap::new(),
         })
@@ -382,31 +404,31 @@ impl MediaWrapper {
                     match decoder.medium() {
                         MediaType::Video => match decoder.video() {
                             Ok(video_decoder) => {
-                                println!("video_stream_index: {:?}", stream_index);
+                                debug!("video_stream_index: {:?}", stream_index);
                                 let d = DecoderType::Video(VideoConsumer::new(video_decoder));
                                 self.map.insert(stream_index, d);
                             }
                             Err(e) => {
-                                println!("video: {:?}", e);
+                                error!("video: {:?}", e);
                             }
                         },
                         MediaType::Audio => match decoder.audio() {
                             Ok(audio_decoder) => {
-                                println!("audio_stream_index: {:?}", stream_index);
+                                debug!("audio_stream_index: {:?}", stream_index);
                                 let d = DecoderType::Audio(AudioConsumer::new(audio_decoder));
                                 self.map.insert(stream_index, d);
                             }
                             Err(e) => {
-                                println!("audio: {:?}", e);
+                                error!("audio: {:?}", e);
                             }
                         },
                         _ => {
-                            println!("other_stream_index: {:?}", stream_index);
+                            trace!("other_stream_index: {:?}", stream_index);
                         }
                     }
                 }
                 Err(e) => {
-                    println!("from_parameters: {:?}", e);
+                    warn!("from_parameters: {:?}", e);
                 }
             };
         }
@@ -429,7 +451,7 @@ impl MediaWrapper {
                         );
 
                         if let Err(e) = consumer.decoder.send_packet(&packet) {
-                            println!("send_packet: {:?}", e);
+                            error!("send_packet: {:?}", e);
                             continue;
                         }
                         let mut decoded = VideoFrame::empty();
@@ -451,8 +473,8 @@ impl MediaWrapper {
                         );
 
                         if let Err(e) = consumer.decoder.send_packet(&packet) {
-                            println!("send_packet: {:?}", e);
-                            break;
+                            error!("send_packet: {:?}", e);
+                            continue;
                         }
                         let mut decoded = AudioFrame::empty();
                         while consumer.decoder.receive_frame(&mut decoded).is_ok() {
@@ -470,7 +492,7 @@ impl MediaWrapper {
                 DecoderType::Audio(consumer) => consumer.end(),
                 DecoderType::None => {}
             }
-            println!("stream_index: {:?} end", stream_index);
+            trace!("stream_index: {:?} end", stream_index);
         }
     }
 }
