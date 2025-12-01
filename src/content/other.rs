@@ -1,45 +1,113 @@
 use super::*;
-use crate::markup::Page;
-use skia_safe::Canvas;
 
 ///"Canv" represents canvas.
-#[derive(Debug)]
+#[derive(Getters, MutGetters)]
 pub(crate) struct Canv {
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)")]
+    element: Arc<RwLock<Element>>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
     scroll_bar: ScrollBar,
 }
 
+impl std::fmt::Debug for Canv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Canv");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o.to_string());
+        }
+        f.field("rect", &self.rect)
+            .field("painter", &self.painter)
+            .finish()
+    }
+}
+
 impl Canv {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            background: Box::new(Range::new()),
-            scroll_bar: ScrollBar::new(),
+            element,
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: Default::default(),
+            scroll_bar: Default::default(),
         }
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
-        let r = wrapper.rect();
+    resize!();
 
-        self.background.as_mut().act(&r, canvas);
+    right_bottom!();
+
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        draw_check!(self);
+
+        self.painter.draw(&self.rect, t);
+    }
+
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match &t.kind {
+            _ => {}
+        }
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
+            _ => {}
+        }
     }
 }
 
 ///"Iframe" represents iframe.
-#[derive(Debug)]
+#[derive(Getters, MutGetters)]
 pub(crate) struct Iframe {
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)")]
+    element: Arc<RwLock<Element>>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
+}
+
+impl std::fmt::Debug for Iframe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("Iframe");
+        if let Ok(o) = self.element.try_read() {
+            f.field("element", &o.to_string());
+        }
+        f.field("rect", &self.rect)
+            .field("painter", &self.painter)
+            .finish()
+    }
 }
 
 impl Iframe {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
-            background: Box::new(Range::new()),
+            element,
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: Default::default(),
         }
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page, wrapper: &mut DrawUnitWrapper) {
-        let r = wrapper.rect();
+    resize!();
 
-        self.background.as_mut().act(&r, canvas);
+    right_bottom!();
+
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        draw_check!(self);
+
+        self.painter.draw(&self.rect, t);
+    }
+
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match &t.kind {
+            _ => {}
+        }
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
+            _ => {}
+        }
     }
 }
