@@ -1,6 +1,10 @@
-use crate::markup::{AttrName, Attribute, Element, Page};
-use crate::script::ScriptRuntime;
-use crate::style::StyleContext;
+mod head;
+
+pub(crate) use self::head::*;
+use crate::markup::*;
+use crate::page::*;
+use crate::script::*;
+use crate::style::*;
 use std::sync::{Arc, RwLock};
 
 ///"Style" represents style.
@@ -27,12 +31,12 @@ impl Style {
         }
     }
 
-    pub fn build(&mut self, page: &mut Page) {
+    pub(crate) fn build(&mut self, context: &mut PageContext) {
         if let Ok(e) = self.element.read() {
-            if e.text.is_empty() {
+            if e.text().is_empty() {
                 return;
             }
-            self.style.build(&e.text, page)
+            self.style.build(e.text(), context)
         }
     }
 }
@@ -61,13 +65,13 @@ impl Script {
         }
     }
 
-    pub fn run(&mut self, page: &mut Page) {
+    pub(crate) fn run(&mut self, context: &mut PageContext) {
         if let Ok(e) = self.element.read() {
-            if e.text.is_empty() {
+            if e.text().is_empty() {
                 return;
             }
-            if let Some(Attribute::TYPE(t)) = e.attribute.get(&AttrName::TYPE) {
-                self.script_rt.run(&e.text, &t, page)
+            if let Some(t) = e.attribute().script_type() {
+                self.script_rt.run(e.text(), &t, context)
             }
         }
     }
