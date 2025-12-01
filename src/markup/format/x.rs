@@ -11,7 +11,7 @@ pub(super) trait XParser {
 
     fn attribute(&mut self, k: String, v: Option<String>);
 
-    fn error(&mut self, n: usize);
+    fn error(&mut self, e: Error);
 }
 
 pub(super) struct Context<'a> {
@@ -51,7 +51,7 @@ impl<'a> Context<'a> {
 
     fn attribute_v(&mut self) -> Option<String> {
         let v = self.temporary_attr.1.drain(..);
-        let v = v.as_str();
+        let v = v.as_str().trim();
         if v.is_empty() {
             None
         } else {
@@ -190,7 +190,8 @@ fn tag_4(context: &mut Context) {
     if c == GT {
         context.current_function = tag_0;
     } else {
-        context.parser.error(context.n);
+        let e = (ErrorKind::BrokenEnd, context.n, context.n).into();
+        context.parser.error(e);
     }
 }
 
