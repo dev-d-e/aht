@@ -1,7 +1,9 @@
 mod css;
 
-use crate::markup::Page;
-use css::CssParser;
+use self::css::*;
+use crate::markup::*;
+use crate::page::*;
+use crate::utils::*;
 
 #[derive(Debug)]
 pub(crate) struct StyleContext {
@@ -13,13 +15,13 @@ impl StyleContext {
         Self { parser: None }
     }
 
-    pub fn build(&mut self, s: &str, page: &mut Page) {
+    pub(crate) fn build(&mut self, s: &str, context: &mut PageContext) {
         if self.parser.is_none() {
-            self.parser.replace(CssParser::new());
+            self.parser.replace(Default::default());
         }
 
         if let Some(p) = &mut self.parser {
-            p.parse(s, page);
+            p.parse(s, context);
         }
     }
 }
