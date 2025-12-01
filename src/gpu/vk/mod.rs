@@ -7,14 +7,14 @@ If you intend to show graphics on a window or a screen, create a [`SurfaceQueueH
 mod context;
 
 use self::context::*;
+use super::*;
 use getset::Getters;
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use skia_safe::gpu::DirectContext;
-use skia_safe::Canvas;
+use std::any::Any;
 use std::cmp::max;
 use std::collections::BTreeMap;
-use std::io::{Error, Result};
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
@@ -29,6 +29,8 @@ use vulkano::swapchain::{
 use vulkano::sync::{now, GpuFuture};
 use vulkano::{single_pass_renderpass, VulkanLibrary};
 
+static INSTANCE: LazyLock<InstanceHolder> = LazyLock::new(|| InstanceHolder::new().unwrap());
+
 ///Represents an instance and physical devices.
 #[derive(Getters)]
 pub struct InstanceHolder {
@@ -41,7 +43,7 @@ pub struct InstanceHolder {
 impl InstanceHolder {
     ///Creates a new instance, get available physical devices.
     pub fn new() -> Result<Self> {
-        let library = VulkanLibrary::new().map_err(|e| Error::other(e))?;
+        let library = VulkanLibrary::new().map_err(|e| to_err(e))?;
         let c = InstanceCreateInfo {
             enabled_extensions: InstanceExtensions {
                 khr_surface: true,
@@ -55,10 +57,10 @@ impl InstanceHolder {
             },
             ..Default::default()
         };
-        let instance = Instance::new(library, c).map_err(|e| Error::other(e))?;
+        let instance = Instance::new(library, c).map_err(|e| to_err(e))?;
         instance
             .enumerate_physical_devices()
-            .map_err(|e| Error::other(e))
+            .map_err(|e| to_err(e))
             .map(|d| Self {
                 instance,
                 physical_devices: d.collect(),
@@ -85,7 +87,7 @@ impl InstanceHolder {
                         .is_some()
             })
             .min_by_key(device_type)
-            .ok_or_else(|| Error::other("device not found"))
+            .ok_or_else(|| ErrorKind::NotFound.into())
             .cloned()
     }
 
@@ -105,7 +107,7 @@ impl InstanceHolder {
                         .is_some()
             })
             .min_by_key(device_type)
-            .ok_or_else(|| Error::other("device not found"))
+            .ok_or_else(|| ErrorKind::NotFound.into())
             .cloned()
     }
 }
@@ -151,7 +153,7 @@ impl DeviceQueueHolder {
     pub fn new(physical_device: Arc<PhysicalDevice>) -> Result<Self> {
         let qf = queue_family_flags(&physical_device);
         if qf.is_empty() {
-            return Err(Error::other("queue"));
+            return Err(ErrorKind::NotFound.into());
         }
 
         let queue_create_infos = qf
@@ -169,7 +171,7 @@ impl DeviceQueueHolder {
             },
             ..Default::default()
         };
-        let (device, queue) = Device::new(physical_device, d).map_err(|e| Error::other(e))?;
+        let (device, queue) = Device::new(physical_device, d).map_err(|e| to_err(e))?;
 
         let (queue_graphics, mut queue_compute): (Vec<Arc<Queue>>, Vec<Arc<Queue>>) = queue
             .partition(|q| {
@@ -178,7 +180,7 @@ impl DeviceQueueHolder {
                     .unwrap_or(false)
             });
         if queue_graphics.is_empty() {
-            return Err(Error::other("queue"));
+            return Err(ErrorKind::NotFound.into());
         } else if queue_compute.is_empty() {
             queue_compute.push(queue_graphics.last().unwrap().clone());
         }
@@ -191,7 +193,7 @@ impl DeviceQueueHolder {
 
     ///Creates a device and accompanying queues from a random physical device.
     pub fn with_random_physical_device() -> Result<Self> {
-        let o = InstanceHolder::new()?.random_physical_device()?;
+        let o = INSTANCE.random_physical_device()?;
         Self::new(o)
     }
 }
@@ -204,25 +206,15 @@ pub struct SurfaceQueueHolder {
     surface: Arc<Surface>,
 }
 
-impl Deref for SurfaceQueueHolder {
-    type Target = DeviceQueueHolder;
-
-    fn deref(&self) -> &Self::Target {
-        &self.queue
-    }
-}
-
-impl DerefMut for SurfaceQueueHolder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.queue
-    }
-}
+deref!(SurfaceQueueHolder, DeviceQueueHolder, queue);
 
 impl SurfaceQueueHolder {
     ///Creates a device and queues and a surface from a closure.
-    pub fn new(f: impl Fn(Arc<Instance>) -> Result<Arc<Surface>>) -> Result<Self> {
-        let i = InstanceHolder::new()?;
-        let surface = f(i.instance().clone())?;
+    pub fn new(
+        w: Arc<impl HasWindowHandle + HasDisplayHandle + Any + Send + Sync>,
+    ) -> Result<Self> {
+        let i = &INSTANCE;
+        let surface = Surface::from_window(i.instance().clone(), w).map_err(|e| to_err(e))?;
         let p = i.physical_device(surface.clone())?;
         DeviceQueueHolder::new(p).map(|queue| Self { queue, surface })
     }
@@ -233,11 +225,11 @@ fn swapchain(device: Arc<Device>, surface: Arc<Surface>) -> Result<Arc<Swapchain
     let physical_device = device.physical_device();
     let surface_capabilities = physical_device
         .surface_capabilities(&surface, Default::default())
-        .map_err(|e| Error::other(e))?;
+        .map_err(|e| to_err(e))?;
 
     let (image_format, image_color_space) = physical_device
         .surface_formats(&surface, Default::default())
-        .map_err(|e| Error::other(e))?[0];
+        .map_err(|e| to_err(e))?[0];
     Swapchain::new(
         device,
         surface,
@@ -252,7 +244,7 @@ fn swapchain(device: Arc<Device>, surface: Arc<Surface>) -> Result<Arc<Swapchain
             ..Default::default()
         },
     )
-    .map_err(|e| Error::other(e))
+    .map_err(|e| to_err(e))
     .map(|(swapchain, _images)| swapchain)
 }
 
@@ -280,6 +272,12 @@ impl TryFrom<SurfaceQueueHolder> for VkRenderer {
     }
 }
 
+impl Drop for VkRenderer {
+    fn drop(&mut self) {
+        self.skia_context.free_gpu_resources();
+    }
+}
+
 impl VkRenderer {
     ///Creates a renderer from a device and queues and a surface.
     pub fn new(holder: DeviceQueueHolder, surface: Arc<Surface>) -> Result<Self> {
@@ -300,10 +298,10 @@ impl VkRenderer {
                 depth_stencil: {},
             },
         )
-        .map_err(|e| Error::other(e))?;
+        .map_err(|e| to_err(e))?;
 
         build_direct_context(device.clone(), holder.queue_graphics[0].clone())
-            .ok_or_else(|| Error::other("skia err"))
+            .ok_or_else(|| ErrorKind::NotFound.into())
             .map(|skia_context| Self {
                 holder,
                 swapchain,
@@ -368,7 +366,7 @@ impl VkRenderer {
     ///Draws contents to canvas.
     pub fn draw<F>(&mut self, f: F)
     where
-        F: FnOnce(&Canvas),
+        F: FnOnce(skia_safe::Surface),
     {
         if self.reflesh {
             if !self.reflesh() {
@@ -378,7 +376,10 @@ impl VkRenderer {
         let (image_index, suboptimal, acquire_future) =
             match acquire_next_image(self.swapchain.clone(), None) {
                 Ok(o) => o,
-                Err(_) => return,
+                Err(e) => {
+                    warn!("{e}");
+                    return;
+                }
             };
 
         if suboptimal {
@@ -395,7 +396,7 @@ impl VkRenderer {
 
         let canvas = surface.canvas();
         canvas.reset_matrix();
-        f(canvas);
+        f(surface);
 
         self.skia_context.flush_and_submit();
 
