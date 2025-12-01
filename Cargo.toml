@@ -3,6 +3,9 @@ name = "aht"
 version = "0.1.0"
 edition = "2021"
 readme = "README.md"
+license = "Apache-2.0"
+keywords = ["hypertext", "gui", "web"]
+categories = ["gui", "web-programming"]
 
 
 [dependencies]
@@ -16,11 +19,24 @@ bytes = "*"
 getset = "*"
 ash = { version = "*", optional = true }
 vulkano = { version = "*", optional = true, default-features = false, features = ["macros"] }
+raw-window-handle = "0.6.2"
+log = "*"
+env_logger = "*"
+tokio = { version = "*", features = ["full"] }
+wgpu = { version = "*", default-features = false, features = ["std", "parking_lot", "wgsl"] }
+pollster = { version = "*", features = ["macro"] }
+
+
+[workspace.dependencies]
+winit = { version = "*", default-features = false, features = ["rwh_06"] }
 
 [target.'cfg(target_os="linux")'.dependencies]
 alsa = "*"
+winit = { workspace = true, optional = true, features = ["wayland", "wayland-csd-adwaita"] }
+
 
 [features]
-default = ["vulkan", "js"]
-vulkan = ["dep:ash", "dep:vulkano"]
+default = ["vulkan", "js", "window"]
+vulkan = ["dep:ash", "dep:vulkano", "wgpu/vulkan"]
 js = ["dep:v8"]
+window = ["dep:winit"]
