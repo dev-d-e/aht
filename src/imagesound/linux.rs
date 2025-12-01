@@ -20,22 +20,23 @@ pub(super) struct Sound {
 
 impl Sound {
     pub(super) fn new(p: SoundProperty) -> Option<Self> {
-        if let Ok(pcm) = PCM::new("default", Direction::Playback, false) {
-            match HwParams::any(&pcm) {
-                Ok(hwp) => {
-                    let _ = hwp.set_channels(p.channels);
-                    let _ = hwp.set_rate(p.rate, ValueOr::Nearest);
-                    let _ = hwp.set_format(sample_to_format(p.format));
-                    let _ = hwp.set_access(AlsaAccess::RWInterleaved);
-                    let _ = pcm.hw_params(&hwp);
+        PCM::new("default", Direction::Playback, false)
+            .map(|pcm| {
+                match HwParams::any(&pcm) {
+                    Ok(hwp) => {
+                        let _ = hwp.set_channels(p.channels);
+                        let _ = hwp.set_rate(p.rate, ValueOr::Nearest);
+                        let _ = hwp.set_format(sample_to_format(p.format));
+                        let _ = hwp.set_access(AlsaAccess::RWInterleaved);
+                        let _ = pcm.hw_params(&hwp);
+                    }
+                    Err(e) => {
+                        error!("HwParams Err: {:?}", e);
+                    }
                 }
-                Err(e) => {
-                    println!("HwParams Err: {:?}", e);
-                }
-            }
-            return Some(Self { pcm });
-        }
-        None
+                Self { pcm }
+            })
+            .ok()
     }
 
     pub(super) fn playback(&mut self, receiver: SoundDataReceiver) {
