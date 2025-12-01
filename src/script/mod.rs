@@ -1,8 +1,9 @@
 #[cfg(feature = "js")]
 mod js;
 
-use crate::markup::{Element, Page};
-use crate::parts::ScriptType;
+use crate::markup::*;
+use crate::page::*;
+use crate::utils::*;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, RwLock};
 
@@ -23,18 +24,18 @@ impl ScriptRuntime {
     }
 
     #[allow(unreachable_patterns)]
-    pub fn run(&mut self, s: &str, script_type: &ScriptType, page: &mut Page) {
+    pub(crate) fn run(&mut self, s: &str, script_type: &ScriptType, context: &mut PageContext) {
         match script_type {
             #[cfg(feature = "js")]
-            ScriptType::JS => self.run_js(s, page),
+            ScriptType::JS => self.run_js(s, context),
             _ => {
-                println!("unsupported {:?}", script_type.to_string())
+                error!("unsupported {:?}", script_type.to_string())
             }
         };
     }
 
     #[cfg(feature = "js")]
-    fn run_js(&mut self, s: &str, page: &mut Page) {
+    fn run_js(&mut self, s: &str, context: &mut PageContext) {
         let (tx, rx) = channel();
         self.sender.replace(tx);
 
@@ -43,8 +44,8 @@ impl ScriptRuntime {
         });
 
         if let Some(tx) = &self.sender {
-            let e = page.body_element();
-            let _ = tx.send(CommandKind::AddGlobalObject("body".to_string(), e));
+            let e = context.body_element();
+            let _ = tx.send(CommandKind::AddGlobalObject("body".to_string(), e.clone()));
             let _ = tx.send(CommandKind::ExecuteScript(s.to_string()));
         }
     }
