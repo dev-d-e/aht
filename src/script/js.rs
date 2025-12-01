@@ -1,5 +1,4 @@
 use super::*;
-use crate::markup::{AttrName, Element};
 use std::cell::OnceCell;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, RwLock};
@@ -7,7 +6,7 @@ use v8::V8::{initialize, initialize_platform};
 use v8::{
     new_default_platform, Array, Context, ContextScope, External, Function, FunctionCallback,
     FunctionCallbackArguments, Global, HandleScope, Isolate, Local, MapFnTo, Object,
-    ObjectTemplate, OwnedIsolate, ReturnValue, Script, String,
+    ObjectTemplate, OwnedIsolate, PinScope, ReturnValue, Script, String,
 };
 
 pub(super) struct JSRuntime {
@@ -25,7 +24,8 @@ impl JSRuntime {
             context: OnceCell::new(),
         };
         o.context.get_or_init(|| {
-            let scope = &mut HandleScope::new(&mut o.isolate);
+            let scope = std::pin::pin!(HandleScope::new(&mut o.isolate));
+            let scope = &mut scope.init();
             let context = Context::new(scope, Default::default());
             let global = Global::new(scope, context);
             global
@@ -33,9 +33,10 @@ impl JSRuntime {
         o
     }
 
-    fn with_scope(&mut self, f: impl FnOnce(&mut HandleScope)) {
+    fn with_scope(&mut self, f: impl FnOnce(&mut PinScope)) {
         if let Some(context) = self.context.get() {
-            let scope = &mut HandleScope::new(&mut self.isolate);
+            let scope = std::pin::pin!(HandleScope::new(&mut self.isolate));
+            let scope = &mut scope.init();
             let context = Local::new(scope, context);
             let scope = &mut ContextScope::new(scope, context);
             f(scope);
@@ -65,7 +66,7 @@ impl JSRuntime {
 }
 
 fn element_to_object<'a>(
-    scope: &mut HandleScope<'a>,
+    scope: &mut PinScope<'a, '_>,
     e: &Arc<RwLock<Element>>,
 ) -> Option<Local<'a, Object>> {
     let t = ObjectTemplate::new(scope);
@@ -80,7 +81,7 @@ fn element_to_object<'a>(
         if let Ok(e) = e.read() {
             if let Some(subset_key) = String::new(scope, "subset") {
                 let mut v = Vec::new();
-                for o in e.subset.iter() {
+                for o in e.subset().iter() {
                     if let Some(o) = element_to_object(scope, o) {
                         v.push(o.into());
                     }
@@ -95,7 +96,7 @@ fn element_to_object<'a>(
 
 #[inline]
 fn build_function<'a>(
-    scope: &mut HandleScope,
+    scope: &mut PinScope,
     obj: Local<'a, Object>,
     key: &str,
     func: impl MapFnTo<FunctionCallback>,
@@ -107,27 +108,27 @@ fn build_function<'a>(
     }
 }
 
-fn func_mark_type(scope: &mut HandleScope, args: FunctionCallbackArguments, mut rv: ReturnValue) {
+fn func_mark_type(scope: &mut PinScope, args: FunctionCallbackArguments, mut rv: ReturnValue) {
     element_function(scope, args, |scope, _, e| {
-        if let Some(s) = String::new(scope, e.mark_type.as_str()) {
+        if let Some(s) = String::new(scope, e.mark_type().as_str()) {
             rv.set(s.into());
         }
     })
 }
 
-fn func_text(scope: &mut HandleScope, args: FunctionCallbackArguments, mut rv: ReturnValue) {
+fn func_text(scope: &mut PinScope, args: FunctionCallbackArguments, mut rv: ReturnValue) {
     element_function(scope, args, |scope, _, e| {
-        if let Some(s) = String::new(scope, e.text.as_str()) {
+        if let Some(s) = String::new(scope, e.text().as_str()) {
             rv.set(s.into());
         }
     })
 }
 
-fn func_attribute(scope: &mut HandleScope, args: FunctionCallbackArguments, mut rv: ReturnValue) {
+fn func_attribute(scope: &mut PinScope, args: FunctionCallbackArguments, mut rv: ReturnValue) {
     element_function(scope, args, |scope, args, e| {
         let k = args.get(0).to_rust_string_lossy(scope);
-        if let Some(k) = AttrName::from(&k) {
-            if let Some(v) = e.attribute.get(&k) {
+        if let Ok(k) = AttrName::try_from(&k) {
+            if let Some(v) = e.attribute_get(&k) {
                 if let Some(s) = String::new(scope, &v.to_string()) {
                     rv.set(s.into());
                 }
@@ -138,9 +139,9 @@ fn func_attribute(scope: &mut HandleScope, args: FunctionCallbackArguments, mut 
 
 #[inline]
 fn element_function(
-    scope: &mut HandleScope,
+    scope: &mut PinScope,
     args: FunctionCallbackArguments,
-    mut f: impl FnMut(&mut HandleScope, FunctionCallbackArguments, &Element),
+    mut f: impl FnMut(&mut PinScope, FunctionCallbackArguments, &Element),
 ) {
     let t = args.this();
     if let Some(a) = t.get_internal_field(scope, 0) {
