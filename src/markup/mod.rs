@@ -1,14 +1,20 @@
-mod format;
+/*!
+A module for markup.
+*/
 
-use crate::content::Body;
-use crate::head::Head;
-use crate::metadata::{Script, Style};
-use crate::parts::*;
+mod entity;
+mod format;
+mod ops;
+mod parts;
+
+pub use self::entity::*;
+pub use self::ops::*;
+pub use self::parts::*;
+use crate::error::*;
+use crate::page::*;
 use crate::utils::*;
-use skia_safe::Canvas;
-use std::collections::{HashMap, VecDeque};
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, RwLock};
+use std::mem::take;
+use std::str::FromStr;
 
 const AHT: &str = "aht";
 const AREA: &str = "area";
@@ -31,7 +37,7 @@ const TITLE: &str = "title";
 const VIDEO: &str = "video";
 
 ///Represents markup.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Mark {
     AHT,
     AREA,
@@ -55,32 +61,6 @@ pub enum Mark {
 }
 
 impl Mark {
-    ///Converts from a string slice.
-    pub fn from(s: &str) -> Option<Self> {
-        match s {
-            AHT => Some(Self::AHT),
-            AREA => Some(Self::AREA),
-            AUDIO => Some(Self::AUDIO),
-            BODY => Some(Self::BODY),
-            BUTTON => Some(Self::BUTTON),
-            CANVAS => Some(Self::CANVAS),
-            FORM => Some(Self::FORM),
-            HEAD => Some(Self::HEAD),
-            IFRAME => Some(Self::IFRAME),
-            IMG => Some(Self::IMG),
-            INP => Some(Self::INP),
-            OPTION => Some(Self::OPTION),
-            PT => Some(Self::PT),
-            SCRIPT => Some(Self::SCRIPT),
-            SELECT => Some(Self::SELECT),
-            STYLE => Some(Self::STYLE),
-            TIME => Some(Self::TIME),
-            TITLE => Some(Self::TITLE),
-            VIDEO => Some(Self::VIDEO),
-            _ => None,
-        }
-    }
-
     ///Returns a string slice.
     pub fn as_str(&self) -> &str {
         match self {
@@ -104,6 +84,51 @@ impl Mark {
             Self::TITLE => TITLE,
             Self::VIDEO => VIDEO,
         }
+    }
+}
+
+impl FromStr for Mark {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            AHT => Ok(Self::AHT),
+            AREA => Ok(Self::AREA),
+            AUDIO => Ok(Self::AUDIO),
+            BODY => Ok(Self::BODY),
+            BUTTON => Ok(Self::BUTTON),
+            CANVAS => Ok(Self::CANVAS),
+            FORM => Ok(Self::FORM),
+            HEAD => Ok(Self::HEAD),
+            IFRAME => Ok(Self::IFRAME),
+            IMG => Ok(Self::IMG),
+            INP => Ok(Self::INP),
+            OPTION => Ok(Self::OPTION),
+            PT => Ok(Self::PT),
+            SCRIPT => Ok(Self::SCRIPT),
+            SELECT => Ok(Self::SELECT),
+            STYLE => Ok(Self::STYLE),
+            TIME => Ok(Self::TIME),
+            TITLE => Ok(Self::TITLE),
+            VIDEO => Ok(Self::VIDEO),
+            _ => Err(ErrorKind::InvalidMark.into()),
+        }
+    }
+}
+
+impl TryFrom<&str> for Mark {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+        Self::from_str(s)
+    }
+}
+
+impl TryFrom<&String> for Mark {
+    type Error = Error;
+
+    fn try_from(s: &String) -> Result<Self> {
+        Self::from_str(s.as_str())
     }
 }
 
@@ -145,7 +170,7 @@ const ONRESIZE: &str = "onresize";
 const ONSCROLL: &str = "onscroll";
 
 ///Represents attribute name.
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AttrName {
     ACTION,
     CLASS,
@@ -188,88 +213,150 @@ impl AttrName {
     ///Returns a string slice.
     pub fn as_str(&self) -> &str {
         match self {
-            AttrName::ACTION => ACTION,
-            AttrName::CLASS => CLASS,
-            AttrName::COLUMN => COLUMN,
-            AttrName::DISABLED => DISABLED,
-            AttrName::ENCTYPE => ENCTYPE,
-            AttrName::HEIGHT => HEIGHT,
-            AttrName::HIDDEN => HIDDEN,
-            AttrName::HREF => HREF,
-            AttrName::ID => ID,
-            AttrName::LANG => LANG,
-            AttrName::METHOD => METHOD,
-            AttrName::MULTIPLE => MULTIPLE,
-            AttrName::NAME => NAME,
-            AttrName::ORDINAL => ORDINAL,
-            AttrName::POSITION => POSITION,
-            AttrName::READONLY => READONLY,
-            AttrName::REQUIRED => REQUIRED,
-            AttrName::ROW => ROW,
-            AttrName::SELECTED => SELECTED,
-            AttrName::SRC => SRC,
-            AttrName::TIP => TIP,
-            AttrName::TYPE => TYPE,
-            AttrName::VALUE => VALUE,
-            AttrName::WIDTH => WIDTH,
-            AttrName::ONABORT => ONABORT,
-            AttrName::ONBLUR => ONBLUR,
-            AttrName::ONCANCEL => ONCANCEL,
-            AttrName::ONCHANGE => ONCHANGE,
-            AttrName::ONCLICK => ONCLICK,
-            AttrName::ONCLOSE => ONCLOSE,
-            AttrName::ONFOCUS => ONFOCUS,
-            AttrName::ONINVALID => ONINVALID,
-            AttrName::ONLOAD => ONLOAD,
-            AttrName::ONRESIZE => ONRESIZE,
-            AttrName::ONSCROLL => ONSCROLL,
+            Self::ACTION => ACTION,
+            Self::CLASS => CLASS,
+            Self::COLUMN => COLUMN,
+            Self::DISABLED => DISABLED,
+            Self::ENCTYPE => ENCTYPE,
+            Self::HEIGHT => HEIGHT,
+            Self::HIDDEN => HIDDEN,
+            Self::HREF => HREF,
+            Self::ID => ID,
+            Self::LANG => LANG,
+            Self::METHOD => METHOD,
+            Self::MULTIPLE => MULTIPLE,
+            Self::NAME => NAME,
+            Self::ORDINAL => ORDINAL,
+            Self::POSITION => POSITION,
+            Self::READONLY => READONLY,
+            Self::REQUIRED => REQUIRED,
+            Self::ROW => ROW,
+            Self::SELECTED => SELECTED,
+            Self::SRC => SRC,
+            Self::TIP => TIP,
+            Self::TYPE => TYPE,
+            Self::VALUE => VALUE,
+            Self::WIDTH => WIDTH,
+            Self::ONABORT => ONABORT,
+            Self::ONBLUR => ONBLUR,
+            Self::ONCANCEL => ONCANCEL,
+            Self::ONCHANGE => ONCHANGE,
+            Self::ONCLICK => ONCLICK,
+            Self::ONCLOSE => ONCLOSE,
+            Self::ONFOCUS => ONFOCUS,
+            Self::ONINVALID => ONINVALID,
+            Self::ONLOAD => ONLOAD,
+            Self::ONRESIZE => ONRESIZE,
+            Self::ONSCROLL => ONSCROLL,
         }
     }
+}
 
-    ///Converts from a string slice.
-    pub fn from(s: &str) -> Option<Self> {
+impl FromStr for AttrName {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
         match s {
-            ACTION => Some(Self::ACTION),
-            CLASS => Some(Self::CLASS),
-            COLUMN => Some(Self::COLUMN),
-            DISABLED => Some(Self::DISABLED),
-            ENCTYPE => Some(Self::ENCTYPE),
-            HEIGHT => Some(Self::HEIGHT),
-            HIDDEN => Some(Self::HIDDEN),
-            HREF => Some(Self::HREF),
-            ID => Some(Self::ID),
-            LANG => Some(Self::LANG),
-            METHOD => Some(Self::METHOD),
-            MULTIPLE => Some(Self::MULTIPLE),
-            NAME => Some(Self::NAME),
-            ORDINAL => Some(Self::ORDINAL),
-            READONLY => Some(Self::READONLY),
-            REQUIRED => Some(Self::REQUIRED),
-            ROW => Some(Self::ROW),
-            SELECTED => Some(Self::SELECTED),
-            SRC => Some(Self::SRC),
-            TIP => Some(Self::TIP),
-            TYPE => Some(Self::TYPE),
-            VALUE => Some(Self::VALUE),
-            WIDTH => Some(Self::WIDTH),
-            ONABORT => Some(Self::ONABORT),
-            ONBLUR => Some(Self::ONBLUR),
-            ONCANCEL => Some(Self::ONCANCEL),
-            ONCHANGE => Some(Self::ONCHANGE),
-            ONCLICK => Some(Self::ONCLICK),
-            ONCLOSE => Some(Self::ONCLOSE),
-            ONFOCUS => Some(Self::ONFOCUS),
-            ONINVALID => Some(Self::ONINVALID),
-            ONLOAD => Some(Self::ONLOAD),
-            ONRESIZE => Some(Self::ONRESIZE),
-            ONSCROLL => Some(Self::ONSCROLL),
-            _ => None,
+            ACTION => Ok(Self::ACTION),
+            CLASS => Ok(Self::CLASS),
+            COLUMN => Ok(Self::COLUMN),
+            DISABLED => Ok(Self::DISABLED),
+            ENCTYPE => Ok(Self::ENCTYPE),
+            HEIGHT => Ok(Self::HEIGHT),
+            HIDDEN => Ok(Self::HIDDEN),
+            HREF => Ok(Self::HREF),
+            ID => Ok(Self::ID),
+            LANG => Ok(Self::LANG),
+            METHOD => Ok(Self::METHOD),
+            MULTIPLE => Ok(Self::MULTIPLE),
+            NAME => Ok(Self::NAME),
+            ORDINAL => Ok(Self::ORDINAL),
+            POSITION => Ok(Self::POSITION),
+            READONLY => Ok(Self::READONLY),
+            REQUIRED => Ok(Self::REQUIRED),
+            ROW => Ok(Self::ROW),
+            SELECTED => Ok(Self::SELECTED),
+            SRC => Ok(Self::SRC),
+            TIP => Ok(Self::TIP),
+            TYPE => Ok(Self::TYPE),
+            VALUE => Ok(Self::VALUE),
+            WIDTH => Ok(Self::WIDTH),
+            ONABORT => Ok(Self::ONABORT),
+            ONBLUR => Ok(Self::ONBLUR),
+            ONCANCEL => Ok(Self::ONCANCEL),
+            ONCHANGE => Ok(Self::ONCHANGE),
+            ONCLICK => Ok(Self::ONCLICK),
+            ONCLOSE => Ok(Self::ONCLOSE),
+            ONFOCUS => Ok(Self::ONFOCUS),
+            ONINVALID => Ok(Self::ONINVALID),
+            ONLOAD => Ok(Self::ONLOAD),
+            ONRESIZE => Ok(Self::ONRESIZE),
+            ONSCROLL => Ok(Self::ONSCROLL),
+            _ => Err(ErrorKind::InvalidAttribute.into()),
+        }
+    }
+}
+
+impl TryFrom<&str> for AttrName {
+    type Error = Error;
+
+    fn try_from(s: &str) -> Result<Self> {
+        Self::from_str(s)
+    }
+}
+
+impl TryFrom<&String> for AttrName {
+    type Error = Error;
+
+    fn try_from(s: &String) -> Result<Self> {
+        Self::from_str(s.as_str())
+    }
+}
+
+impl From<&Attribute> for AttrName {
+    fn from(a: &Attribute) -> Self {
+        match a {
+            Attribute::ACTION(_) => Self::ACTION,
+            Attribute::CLASS(_) => Self::CLASS,
+            Attribute::COLUMN(_) => Self::COLUMN,
+            Attribute::DISABLED(_) => Self::DISABLED,
+            Attribute::ENCTYPE(_) => Self::ENCTYPE,
+            Attribute::HEIGHT(_) => Self::HEIGHT,
+            Attribute::HIDDEN(_) => Self::HIDDEN,
+            Attribute::HREF(_) => Self::HREF,
+            Attribute::ID(_) => Self::ID,
+            Attribute::LANG(_) => Self::LANG,
+            Attribute::METHOD(_) => Self::METHOD,
+            Attribute::MULTIPLE(_) => Self::MULTIPLE,
+            Attribute::NAME(_) => Self::NAME,
+            Attribute::ORDINAL(_) => Self::ORDINAL,
+            Attribute::POSITION(_) => Self::POSITION,
+            Attribute::READONLY(_) => Self::READONLY,
+            Attribute::REQUIRED(_) => Self::REQUIRED,
+            Attribute::ROW(_) => Self::ROW,
+            Attribute::SELECTED(_) => Self::SELECTED,
+            Attribute::SRC(_) => Self::SRC,
+            Attribute::TIP(_) => Self::TIP,
+            Attribute::TYPE(_) => Self::TYPE,
+            Attribute::VALUE(_) => Self::VALUE,
+            Attribute::WIDTH(_) => Self::WIDTH,
+            Attribute::ONABORT(_) => Self::ONABORT,
+            Attribute::ONBLUR(_) => Self::ONBLUR,
+            Attribute::ONCANCEL(_) => Self::ONCANCEL,
+            Attribute::ONCHANGE(_) => Self::ONCHANGE,
+            Attribute::ONCLICK(_) => Self::ONCLICK,
+            Attribute::ONCLOSE(_) => Self::ONCLOSE,
+            Attribute::ONFOCUS(_) => Self::ONFOCUS,
+            Attribute::ONINVALID(_) => Self::ONINVALID,
+            Attribute::ONLOAD(_) => Self::ONLOAD,
+            Attribute::ONRESIZE(_) => Self::ONRESIZE,
+            Attribute::ONSCROLL(_) => Self::ONSCROLL,
         }
     }
 }
 
 ///Represents attribute.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Attribute {
     ACTION(String),
     CLASS(String),
@@ -310,868 +397,92 @@ pub enum Attribute {
 
 impl Attribute {
     ///Converts from a pair of string. Returns Err when it's not attribute.
-    pub fn from(a: &str, s: Option<String>) -> Result<Self, Option<String>> {
+    pub fn from(a: &AttrName, s: &mut String) -> Result<Self> {
+        let t = s.as_str();
         match a {
-            ACTION => match s {
-                Some(s) => Ok(Self::ACTION(s)),
-                None => Err(s),
-            },
-            CLASS => match s {
-                Some(s) => Ok(Self::CLASS(s)),
-                None => Err(s),
-            },
-            COLUMN => match s {
-                Some(s) => Ok(Self::COLUMN(Points::from_str(&s))),
-                None => Err(s),
-            },
-            DISABLED => match s {
-                Some(s) => Ok(Self::DISABLED(to_bool(&s))),
-                None => Ok(Self::DISABLED(true)),
-            },
-            ENCTYPE => match s {
-                Some(s) => Ok(Self::ENCTYPE(s)),
-                None => Err(s),
-            },
-            HEIGHT => match s {
-                Some(s) => match Distance::from_str(&s) {
-                    Some(s) => Ok(Self::HEIGHT(s)),
-                    None => Err(Some(s)),
-                },
-                None => Err(s),
-            },
-            HIDDEN => match s {
-                Some(s) => Ok(Self::HIDDEN(to_bool(&s))),
-                None => Ok(Self::HIDDEN(true)),
-            },
-            HREF => match s {
-                Some(s) => Ok(Self::HREF(s)),
-                None => Err(s),
-            },
-            ID => match s {
-                Some(s) => Ok(Self::ID(s)),
-                None => Err(s),
-            },
-            LANG => match s {
-                Some(s) => Ok(Self::LANG(s)),
-                None => Err(s),
-            },
-            METHOD => match s {
-                Some(s) => Ok(Self::METHOD(s)),
-                None => Err(s),
-            },
-            MULTIPLE => match s {
-                Some(s) => Ok(Self::MULTIPLE(to_bool(&s))),
-                None => Ok(Self::MULTIPLE(true)),
-            },
-            NAME => match s {
-                Some(s) => Ok(Self::NAME(s)),
-                None => Err(s),
-            },
-            ORDINAL => match s {
-                Some(s) => Ok(Self::ORDINAL(Ordinal::from_str(&s))),
-                None => Err(s),
-            },
-            POSITION => match s {
-                Some(s) => match Coord::from_str(&s) {
-                    Some(c) => Ok(Self::POSITION(c)),
-                    None => Err(Some(s)),
-                },
-                None => Err(s),
-            },
-            READONLY => match s {
-                Some(s) => Ok(Self::READONLY(to_bool(&s))),
-                None => Ok(Self::READONLY(true)),
-            },
-            REQUIRED => match s {
-                Some(s) => Ok(Self::REQUIRED(to_bool(&s))),
-                None => Ok(Self::REQUIRED(true)),
-            },
-            ROW => match s {
-                Some(s) => Ok(Self::ROW(Points::from_str(&s))),
-                None => Err(s),
-            },
-            SELECTED => match s {
-                Some(s) => Ok(Self::SELECTED(to_bool(&s))),
-                None => Ok(Self::SELECTED(true)),
-            },
-            SRC => match s {
-                Some(s) => Ok(Self::SRC(s)),
-                None => Err(s),
-            },
-            TIP => match s {
-                Some(s) => Ok(Self::TIP(s)),
-                None => Err(s),
-            },
-            TYPE => match s {
-                Some(s) => match ScriptType::from_str(&s) {
-                    Some(t) => Ok(Self::TYPE(t)),
-                    None => Err(Some(s)),
-                },
-                None => Err(s),
-            },
-            VALUE => match s {
-                Some(s) => Ok(Self::VALUE(s)),
-                None => Err(s),
-            },
-            WIDTH => match s {
-                Some(s) => match Distance::from_str(&s) {
-                    Some(s) => Ok(Self::WIDTH(s)),
-                    None => Err(Some(s)),
-                },
-                None => Err(s),
-            },
-            ONABORT => match s {
-                Some(s) => Ok(Self::ONABORT(s)),
-                None => Err(s),
-            },
-            ONBLUR => match s {
-                Some(s) => Ok(Self::ONBLUR(s)),
-                None => Err(s),
-            },
-            ONCANCEL => match s {
-                Some(s) => Ok(Self::ONCANCEL(s)),
-                None => Err(s),
-            },
-            ONCHANGE => match s {
-                Some(s) => Ok(Self::ONCHANGE(s)),
-                None => Err(s),
-            },
-            ONCLICK => match s {
-                Some(s) => Ok(Self::ONCLICK(s)),
-                None => Err(s),
-            },
-            ONCLOSE => match s {
-                Some(s) => Ok(Self::ONCLOSE(s)),
-                None => Err(s),
-            },
-            ONFOCUS => match s {
-                Some(s) => Ok(Self::ONFOCUS(s)),
-                None => Err(s),
-            },
-            ONINVALID => match s {
-                Some(s) => Ok(Self::ONINVALID(s)),
-                None => Err(s),
-            },
-            ONLOAD => match s {
-                Some(s) => Ok(Self::ONLOAD(s)),
-                None => Err(s),
-            },
-            ONRESIZE => match s {
-                Some(s) => Ok(Self::ONRESIZE(s)),
-                None => Err(s),
-            },
-            ONSCROLL => match s {
-                Some(s) => Ok(Self::ONSCROLL(s)),
-                None => Err(s),
-            },
-            _ => Err(s),
+            AttrName::ACTION => Ok(Self::ACTION(take(s))),
+            AttrName::CLASS => Ok(Self::CLASS(take(s))),
+            AttrName::COLUMN => Points::try_from(t).map(|o| Self::COLUMN(o)),
+            AttrName::DISABLED => to_bool(t).map(|o| Self::DISABLED(o)),
+            AttrName::ENCTYPE => Ok(Self::ENCTYPE(take(s))),
+            AttrName::HEIGHT => Distance::try_from(t).map(|o| Self::HEIGHT(o)),
+            AttrName::HIDDEN => to_bool(t).map(|o| Self::HIDDEN(o)),
+            AttrName::HREF => Ok(Self::HREF(take(s))),
+            AttrName::ID => Ok(Self::ID(take(s))),
+            AttrName::LANG => Ok(Self::LANG(take(s))),
+            AttrName::METHOD => Ok(Self::METHOD(take(s))),
+            AttrName::MULTIPLE => to_bool(t).map(|o| Self::MULTIPLE(o)),
+            AttrName::NAME => Ok(Self::NAME(take(s))),
+            AttrName::ORDINAL => Ordinal::try_from(t).map(|o| Self::ORDINAL(o)),
+            AttrName::POSITION => Coord::try_from(t).map(|c| Self::POSITION(c)),
+            AttrName::READONLY => to_bool(t).map(|o| Self::READONLY(o)),
+            AttrName::REQUIRED => to_bool(t).map(|o| Self::REQUIRED(o)),
+            AttrName::ROW => Points::try_from(t).map(|o| Self::ROW(o)),
+            AttrName::SELECTED => to_bool(t).map(|o| Self::SELECTED(o)),
+            AttrName::SRC => Ok(Self::SRC(take(s))),
+            AttrName::TIP => Ok(Self::TIP(take(s))),
+            AttrName::TYPE => ScriptType::try_from(t).map(|t| Self::TYPE(t)),
+            AttrName::VALUE => Ok(Self::VALUE(take(s))),
+            AttrName::WIDTH => Distance::try_from(t).map(|o| Self::WIDTH(o)),
+            AttrName::ONABORT => Ok(Self::ONABORT(take(s))),
+            AttrName::ONBLUR => Ok(Self::ONBLUR(take(s))),
+            AttrName::ONCANCEL => Ok(Self::ONCANCEL(take(s))),
+            AttrName::ONCHANGE => Ok(Self::ONCHANGE(take(s))),
+            AttrName::ONCLICK => Ok(Self::ONCLICK(take(s))),
+            AttrName::ONCLOSE => Ok(Self::ONCLOSE(take(s))),
+            AttrName::ONFOCUS => Ok(Self::ONFOCUS(take(s))),
+            AttrName::ONINVALID => Ok(Self::ONINVALID(take(s))),
+            AttrName::ONLOAD => Ok(Self::ONLOAD(take(s))),
+            AttrName::ONRESIZE => Ok(Self::ONRESIZE(take(s))),
+            AttrName::ONSCROLL => Ok(Self::ONSCROLL(take(s))),
         }
     }
 
+    ///Returns attribute name.
     pub fn name(&self) -> AttrName {
-        match self {
-            Self::ACTION(_) => AttrName::ACTION,
-            Self::CLASS(_) => AttrName::CLASS,
-            Self::COLUMN(_) => AttrName::COLUMN,
-            Self::DISABLED(_) => AttrName::DISABLED,
-            Self::ENCTYPE(_) => AttrName::ENCTYPE,
-            Self::HEIGHT(_) => AttrName::HEIGHT,
-            Self::HIDDEN(_) => AttrName::HIDDEN,
-            Self::HREF(_) => AttrName::HREF,
-            Self::ID(_) => AttrName::ID,
-            Self::LANG(_) => AttrName::LANG,
-            Self::METHOD(_) => AttrName::METHOD,
-            Self::MULTIPLE(_) => AttrName::MULTIPLE,
-            Self::NAME(_) => AttrName::NAME,
-            Self::ORDINAL(_) => AttrName::ORDINAL,
-            Self::POSITION(_) => AttrName::POSITION,
-            Self::READONLY(_) => AttrName::READONLY,
-            Self::REQUIRED(_) => AttrName::REQUIRED,
-            Self::ROW(_) => AttrName::ROW,
-            Self::SELECTED(_) => AttrName::SELECTED,
-            Self::SRC(_) => AttrName::SRC,
-            Self::TIP(_) => AttrName::TIP,
-            Self::TYPE(_) => AttrName::TYPE,
-            Self::VALUE(_) => AttrName::VALUE,
-            Self::WIDTH(_) => AttrName::WIDTH,
-            Self::ONABORT(_) => AttrName::ONABORT,
-            Self::ONBLUR(_) => AttrName::ONBLUR,
-            Self::ONCANCEL(_) => AttrName::ONCANCEL,
-            Self::ONCHANGE(_) => AttrName::ONCHANGE,
-            Self::ONCLICK(_) => AttrName::ONCLICK,
-            Self::ONCLOSE(_) => AttrName::ONCLOSE,
-            Self::ONFOCUS(_) => AttrName::ONFOCUS,
-            Self::ONINVALID(_) => AttrName::ONINVALID,
-            Self::ONLOAD(_) => AttrName::ONLOAD,
-            Self::ONRESIZE(_) => AttrName::ONRESIZE,
-            Self::ONSCROLL(_) => AttrName::ONSCROLL,
-        }
-    }
-
-    pub fn to_string(&self) -> String {
-        match self {
-            Attribute::ACTION(s) => s.to_string(),
-            Attribute::CLASS(s) => s.to_string(),
-            Attribute::COLUMN(s) => s.to_string(),
-            Attribute::DISABLED(s) => s.to_string(),
-            Attribute::ENCTYPE(s) => s.to_string(),
-            Attribute::HEIGHT(s) => s.to_string(),
-            Attribute::HIDDEN(s) => s.to_string(),
-            Attribute::HREF(s) => s.to_string(),
-            Attribute::ID(s) => s.to_string(),
-            Attribute::LANG(s) => s.to_string(),
-            Attribute::METHOD(s) => s.to_string(),
-            Attribute::MULTIPLE(s) => s.to_string(),
-            Attribute::NAME(s) => s.to_string(),
-            Attribute::ORDINAL(s) => s.to_string(),
-            Attribute::POSITION(s) => s.to_string(),
-            Attribute::READONLY(s) => s.to_string(),
-            Attribute::REQUIRED(s) => s.to_string(),
-            Attribute::ROW(s) => s.to_string(),
-            Attribute::SELECTED(s) => s.to_string(),
-            Attribute::SRC(s) => s.to_string(),
-            Attribute::TIP(s) => s.to_string(),
-            Attribute::TYPE(s) => s.to_string(),
-            Attribute::VALUE(s) => s.to_string(),
-            Attribute::WIDTH(s) => s.to_string(),
-            Attribute::ONABORT(s) => s.to_string(),
-            Attribute::ONBLUR(s) => s.to_string(),
-            Attribute::ONCANCEL(s) => s.to_string(),
-            Attribute::ONCHANGE(s) => s.to_string(),
-            Attribute::ONCLICK(s) => s.to_string(),
-            Attribute::ONCLOSE(s) => s.to_string(),
-            Attribute::ONFOCUS(s) => s.to_string(),
-            Attribute::ONINVALID(s) => s.to_string(),
-            Attribute::ONLOAD(s) => s.to_string(),
-            Attribute::ONRESIZE(s) => s.to_string(),
-            Attribute::ONSCROLL(s) => s.to_string(),
-        }
+        self.into()
     }
 }
 
-pub(crate) struct AttributeHolder(HashMap<AttrName, Attribute>);
-
-impl AttributeHolder {
-    fn new() -> Self {
-        Self(HashMap::new())
-    }
-}
-
-impl Deref for AttributeHolder {
-    type Target = HashMap<AttrName, Attribute>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for AttributeHolder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl std::fmt::Debug for AttributeHolder {
+impl std::fmt::Display for Attribute {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map().entries(&self.0).finish()
-    }
-}
-
-pub(crate) struct ElementHolder(VecDeque<Arc<RwLock<Element>>>);
-
-impl ElementHolder {
-    fn new() -> Self {
-        Self(VecDeque::new())
-    }
-}
-
-impl Deref for ElementHolder {
-    type Target = VecDeque<Arc<RwLock<Element>>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ElementHolder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl std::fmt::Debug for ElementHolder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_list();
-        self.0.iter().for_each(|o| {
-            if let Ok(o) = o.try_read() {
-                f.entry(&o);
-            }
-        });
-        f.finish()
-    }
-}
-
-///Represents element.
-pub struct Element {
-    pub(crate) mark_type: Mark,
-    pub(crate) text: String,
-    pub(crate) attribute: AttributeHolder,
-    pub(crate) subset: ElementHolder,
-    pub(crate) upper: Option<Arc<RwLock<Element>>>,
-}
-
-impl std::fmt::Debug for Element {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Element")
-            .field("mark_type", &self.mark_type)
-            .field("text", &self.text)
-            .field("attribute", &self.attribute)
-            .field("subset", &self.subset)
-            .field("upper", &self.upper.is_some())
-            .finish()
-    }
-}
-
-impl std::fmt::Display for Element {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Element")
-            .field("mark_type", &self.mark_type)
-            .field("text", &self.text)
-            .field("attribute", &!self.attribute.is_empty())
-            .field("subset", &!self.subset.is_empty())
-            .field("upper", &self.upper.is_some())
-            .finish()
-    }
-}
-
-impl Element {
-    ///Creates a new element.
-    pub fn new(mark_type: Mark, text: String) -> Self {
-        Self {
-            mark_type,
-            text,
-            attribute: AttributeHolder::new(),
-            subset: ElementHolder::new(),
-            upper: None,
-        }
-    }
-
-    ///Parse a string slice to many.
-    pub fn many_from_str(buf: &str) -> VecDeque<Self> {
-        format::accept(buf)
-    }
-
-    ///Parse a string slice to it.
-    pub fn from_str(buf: &str) -> Option<Self> {
-        format::accept(buf).pop_front()
-    }
-
-    ///Returns a string slice of this element's type.
-    pub fn as_str(&self) -> &str {
-        self.mark_type.as_str()
-    }
-
-    pub(crate) fn set_upper(
-        &mut self,
-        upper_arc: Arc<RwLock<Element>>,
-        self_arc: Arc<RwLock<Element>>,
-    ) {
-        self.upper.replace(upper_arc);
-        self.subset.iter_mut().for_each(|o| {
-            if let Ok(mut e) = o.write() {
-                e.set_upper(self_arc.clone(), o.clone());
-            }
-        });
-    }
-
-    pub(crate) fn subset_upper(&mut self) {
-        self.subset.iter_mut().for_each(|a| {
-            if let Ok(mut e) = a.write() {
-                e.subset.iter_mut().for_each(|b| {
-                    if let Ok(mut e) = b.write() {
-                        e.set_upper(a.clone(), b.clone());
-                    }
-                });
-            }
-        });
-    }
-
-    fn equal_mark(&self, n: usize, mark_type: Mark) -> bool {
-        if let Some(o) = self.subset.get(n) {
-            if let Ok(e) = o.read() {
-                if e.mark_type == mark_type {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn page_element(
-        &self,
-    ) -> Option<(
-        Arc<RwLock<Element>>,
-        Arc<RwLock<Element>>,
-        Arc<RwLock<Element>>,
-        Arc<RwLock<Element>>,
-    )> {
-        if self.mark_type == Mark::AHT && self.subset.len() >= 4 {
-            if self.equal_mark(0, Mark::HEAD)
-                && self.equal_mark(1, Mark::BODY)
-                && self.equal_mark(2, Mark::STYLE)
-                && self.equal_mark(3, Mark::SCRIPT)
-            {
-                if let Some(head) = self.subset.get(0) {
-                    if let Some(body) = self.subset.get(1) {
-                        if let Some(style) = self.subset.get(2) {
-                            if let Some(script) = self.subset.get(3) {
-                                return Some((
-                                    head.clone(),
-                                    body.clone(),
-                                    style.clone(),
-                                    script.clone(),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    ///Converts to page.
-    pub fn to_page(self) -> Result<Page, Self> {
-        if let Some((head, body, style, script)) = self.page_element() {
-            return Ok(Page::new(self, head, body, style, script));
-        }
-        Err(self)
-    }
-
-    fn subset_swap_remove(&mut self, o: Arc<RwLock<Element>>, a: Element) {
-        if let Some(i) = self
-            .subset
-            .iter()
-            .position(|k| Arc::as_ptr(&k) == Arc::as_ptr(&o))
-        {
-            self.subset.push_back(Arc::new(RwLock::new(a)));
-            self.subset.swap_remove_back(i);
-        }
-    }
-
-    fn subset_find(
-        &self,
-        self_arc: Arc<RwLock<Element>>,
-        o: Arc<RwLock<Element>>,
-    ) -> Option<Arc<RwLock<Element>>> {
-        self.subset.iter().find_map(|k| {
-            if Arc::as_ptr(&k) == Arc::as_ptr(&o) {
-                Some(self_arc.clone())
-            } else {
-                if let Ok(e) = k.read() {
-                    e.subset_find(k.clone(), o.clone())
-                } else {
-                    None
-                }
-            }
-        })
-    }
-}
-
-//------------------------------------------------------------------------------------------
-
-///Represents page.
-pub struct Page {
-    root: Element,
-    head_element: Arc<RwLock<Element>>,
-    body_element: Arc<RwLock<Element>>,
-    style_element: Arc<RwLock<Element>>,
-    script_element: Arc<RwLock<Element>>,
-    head: Head,
-    body: Body,
-    style: Style,
-    script: Script,
-    pub(crate) cursor: VisionAction,
-    pub(crate) keyboard_input: Option<Arc<RwLock<String>>>,
-}
-
-impl std::fmt::Debug for Page {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Page")
-            .field("root", &self.root)
-            .field("head", &self.head)
-            .field("body", &self.body)
-            .field("style", &self.style)
-            .field("script", &self.script)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Page {
-    fn new(
-        root: Element,
-        head_element: Arc<RwLock<Element>>,
-        body_element: Arc<RwLock<Element>>,
-        style_element: Arc<RwLock<Element>>,
-        script_element: Arc<RwLock<Element>>,
-    ) -> Self {
-        let head = Head::new(head_element.clone());
-        let body = Body::new(body_element.clone());
-        let style = Style::new(style_element.clone());
-        let script = Script::new(script_element.clone());
-        let mut page = Self {
-            root,
-            head_element,
-            body_element,
-            style_element,
-            script_element,
-            head,
-            body,
-            style,
-            script,
-            cursor: VisionAction::new(),
-            keyboard_input: None,
+        let s = match self {
+            Attribute::ACTION(o) => o,
+            Attribute::CLASS(o) => o,
+            Attribute::COLUMN(o) => &o.to_string(),
+            Attribute::DISABLED(o) => &o.to_string(),
+            Attribute::ENCTYPE(o) => o,
+            Attribute::HEIGHT(o) => &o.to_string(),
+            Attribute::HIDDEN(o) => &o.to_string(),
+            Attribute::HREF(o) => o,
+            Attribute::ID(o) => o,
+            Attribute::LANG(o) => o,
+            Attribute::METHOD(o) => o,
+            Attribute::MULTIPLE(o) => &o.to_string(),
+            Attribute::NAME(o) => o,
+            Attribute::ORDINAL(o) => &o.to_string(),
+            Attribute::POSITION(o) => &o.to_string(),
+            Attribute::READONLY(o) => &o.to_string(),
+            Attribute::REQUIRED(o) => &o.to_string(),
+            Attribute::ROW(o) => &o.to_string(),
+            Attribute::SELECTED(o) => &o.to_string(),
+            Attribute::SRC(o) => o,
+            Attribute::TIP(o) => o,
+            Attribute::TYPE(o) => &o.to_string(),
+            Attribute::VALUE(o) => o,
+            Attribute::WIDTH(o) => &o.to_string(),
+            Attribute::ONABORT(o) => o,
+            Attribute::ONBLUR(o) => o,
+            Attribute::ONCANCEL(o) => o,
+            Attribute::ONCHANGE(o) => o,
+            Attribute::ONCLICK(o) => o,
+            Attribute::ONCLOSE(o) => o,
+            Attribute::ONFOCUS(o) => o,
+            Attribute::ONINVALID(o) => o,
+            Attribute::ONLOAD(o) => o,
+            Attribute::ONRESIZE(o) => o,
+            Attribute::ONSCROLL(o) => o,
         };
-
-        let p = &mut page as *mut Self;
-        page.style.build(unsafe { &mut *p });
-        page.script.run(unsafe { &mut *p });
-        page
-    }
-
-    ///Parse a string slice.
-    pub fn from_str(buf: &str) -> Option<Self> {
-        Element::from_str(buf)?.to_page().ok()
-    }
-
-    pub(crate) fn body_element(&self) -> Arc<RwLock<Element>> {
-        self.body_element.clone()
-    }
-
-    pub(crate) fn body(&mut self) -> &mut Body {
-        &mut self.body
-    }
-
-    pub fn set_zero(&mut self, x: isize, y: isize) {
-        self.body.set_zero(x, y);
-    }
-
-    pub fn resize(&mut self, width: isize, height: isize) {
-        self.body.resize(width, height);
-    }
-
-    ///Returns true if draw.
-    pub fn draw(&mut self, canvas: &Canvas) -> bool {
-        let p = self as *mut Self;
-        self.body.draw(canvas, unsafe { &mut *p });
-        false
-    }
-
-    pub fn find_mark(&mut self, s: Mark) -> Vec<Arc<RwLock<Element>>> {
-        self.find(Conditions::new_with_mark(s))
-    }
-
-    pub fn find_class(&mut self, s: &str) -> Vec<Arc<RwLock<Element>>> {
-        self.find(Conditions::new_with_class(s))
-    }
-
-    pub fn find_id(&mut self, s: &str) -> Option<Arc<RwLock<Element>>> {
-        let mut v = self.find(Conditions::new_with_id(s));
-        if v.is_empty() {
-            None
-        } else {
-            Some(v.remove(0))
-        }
-    }
-
-    ///Find `Element` references by `Conditions`.
-    pub fn find(&mut self, conditions: Conditions) -> Vec<Arc<RwLock<Element>>> {
-        let v = vec![self.head_element.clone(), self.body_element.clone()];
-        find_elements(v, conditions)
-    }
-
-    pub fn find_in_body(&mut self, conditions: Conditions) -> Vec<Arc<RwLock<Element>>> {
-        let v = vec![self.body_element()];
-        find_elements(v, conditions)
-    }
-
-    pub fn set_cursor(&mut self, p: VisionPosition) {
-        self.cursor.add(p);
-    }
-
-    pub fn keyboard_input(&mut self, s: &str) {
-        if let Some(o) = &mut self.keyboard_input {
-            if let Ok(mut o) = o.try_write() {
-                o.push_str(s);
-            }
-        }
-    }
-}
-
-pub(crate) fn find_elements(
-    mut v: Vec<Arc<RwLock<Element>>>,
-    conditions: Conditions,
-) -> Vec<Arc<RwLock<Element>>> {
-    for c in conditions.get() {
-        let mut r = Vec::new();
-        match c {
-            Condition::MARK(s) => {
-                v.into_iter().for_each(|t| find_mark(t, &s, &mut r));
-            }
-            Condition::CLASS(s) => {
-                v.into_iter().for_each(|t| find_class(t, &s, &mut r));
-            }
-            Condition::ID(s) => {
-                for t in v {
-                    if let Some(p) = find_id(t, &s) {
-                        r.push(p);
-                        break;
-                    }
-                }
-            }
-        }
-        v = r;
-    }
-    v
-}
-
-fn find_mark(o: Arc<RwLock<Element>>, s: &Mark, v: &mut Vec<Arc<RwLock<Element>>>) {
-    if let Ok(e) = o.read() {
-        if e.mark_type == *s {
-            v.push(o.clone())
-        }
-        for k in e.subset.iter() {
-            find_mark(k.clone(), s, v)
-        }
-    }
-}
-
-fn find_class(o: Arc<RwLock<Element>>, s: &str, v: &mut Vec<Arc<RwLock<Element>>>) {
-    if let Ok(e) = o.read() {
-        if let Some(Attribute::CLASS(k)) = e.attribute.get(&AttrName::CLASS) {
-            if k == s {
-                v.push(o.clone());
-            }
-        }
-        for k in e.subset.iter() {
-            find_class(k.clone(), s, v)
-        }
-    }
-}
-
-fn find_id(o: Arc<RwLock<Element>>, s: &str) -> Option<Arc<RwLock<Element>>> {
-    if let Ok(e) = o.read() {
-        if let Some(Attribute::ID(k)) = e.attribute.get(&AttrName::ID) {
-            if k == s {
-                return Some(o.clone());
-            }
-        }
-        for k in e.subset.iter() {
-            let t = find_id(k.clone(), s);
-            if t.is_some() {
-                return t;
-            }
-        }
-    }
-    None
-}
-
-#[derive(Debug)]
-enum Condition {
-    MARK(Mark),
-    CLASS(String),
-    ID(String),
-}
-
-///Represents find conditions.
-#[derive(Debug)]
-pub struct Conditions(Vec<Condition>);
-
-impl Conditions {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    pub fn new_with_mark(s: Mark) -> Self {
-        let mut c = Self::new();
-        c.mark(s);
-        c
-    }
-
-    pub fn new_with_class(s: impl Into<String>) -> Self {
-        let mut c = Self::new();
-        c.class(s);
-        c
-    }
-
-    pub fn new_with_id(s: impl Into<String>) -> Self {
-        let mut c = Self::new();
-        c.id(s);
-        c
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    fn get(&self) -> &Vec<Condition> {
-        &self.0
-    }
-
-    pub fn mark(&mut self, s: Mark) {
-        self.0.push(Condition::MARK(s));
-    }
-
-    pub fn class(&mut self, s: impl Into<String>) {
-        self.0.push(Condition::CLASS(s.into()))
-    }
-
-    pub fn id(&mut self, s: impl Into<String>) {
-        self.0.push(Condition::ID(s.into()))
-    }
-
-    pub fn reverse(&mut self) {
-        self.0.reverse()
-    }
-}
-
-///Represents cursor action.
-#[derive(Clone, Debug, PartialEq)]
-pub enum CursorAction {
-    Down(usize),
-    Up,
-}
-
-///Represents cursor position and action.
-#[derive(Debug)]
-pub struct VisionPosition {
-    xy: Coord2D,
-    action: CursorAction,
-}
-
-impl VisionPosition {
-    pub fn new(xy: Coord2D, action: CursorAction) -> Self {
-        Self { xy, action }
-    }
-
-    pub fn with_xy(x: isize, y: isize, action: CursorAction) -> Self {
-        Self::new(Coord2D::xy(x, y), action)
-    }
-
-    pub fn with_xy_up(x: isize, y: isize) -> Self {
-        Self::with_xy(x, y, CursorAction::Up)
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct VisionAction {
-    a: Option<VisionPosition>,
-    b: Option<VisionPosition>,
-    f: bool,
-}
-
-impl VisionAction {
-    fn new() -> Self {
-        Self {
-            a: None,
-            b: None,
-            f: true,
-        }
-    }
-
-    fn add(&mut self, v: VisionPosition) {
-        if self.f {
-            self.b.replace(v);
-            self.f = false;
-        } else {
-            self.a.replace(v);
-            self.f = true;
-        }
-    }
-
-    fn ordered(&self) -> (&Option<VisionPosition>, &Option<VisionPosition>) {
-        if self.f {
-            (&self.a, &self.b)
-        } else {
-            (&self.b, &self.a)
-        }
-    }
-
-    pub(crate) fn position(&self) -> Option<&Coord2D> {
-        let (fir, _) = self.ordered();
-        if let Some(fir) = fir {
-            return Some(&fir.xy);
-        }
-        None
-    }
-
-    pub(crate) fn analyse(&self) -> Option<(&Coord2D, VisionActionResult)> {
-        let (fir, sec) = self.ordered();
-        if let Some(fir) = fir {
-            match fir.action {
-                CursorAction::Down(n) => {
-                    if let Some(sec) = sec {
-                        if let CursorAction::Down(_) = sec.action {
-                            return Some((
-                                &fir.xy,
-                                VisionActionResult::PressSweep(fir.xy.away_from(&sec.xy)),
-                            ));
-                        }
-                    }
-                    return Some((&fir.xy, VisionActionResult::Press(n)));
-                }
-                CursorAction::Up => {
-                    if let Some(sec) = sec {
-                        if sec.action == CursorAction::Up {
-                            return Some((
-                                &fir.xy,
-                                VisionActionResult::Sweep(fir.xy.away_from(&sec.xy)),
-                            ));
-                        }
-                    }
-                    return Some((&fir.xy, VisionActionResult::Loosen));
-                }
-            }
-        }
-        None
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum VisionActionResult {
-    Press(usize),
-    Sweep(RectSide),
-    PressSweep(RectSide),
-    Loosen,
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn element() {
-        let s = "<aht>
-        <head lang=en>
-            <title>1</title>
-        </head>
-        <body column=\"\" row=\"2\">
-            <inp name=\"\" value=\"\" readonly required>input</inp>
-            <button href=\"\" async=true>button</button>
-            <area class=\"\" id=\"\" width=\"1000\" height=\"100\" column=2 row=\"\"></area>
-        </body>
-        <style>
-        </style>
-        <script>
-        </script>
-     </aht>";
-        if let Some(e) = Element::from_str(&s) {
-            println!("{:?}", e);
-        }
-
-        if let Some(e) = Page::from_str(&s) {
-            println!("{:?}", e);
-        }
+        f.write_str(s)
     }
 }
