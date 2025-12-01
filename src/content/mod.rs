@@ -1,28 +1,33 @@
+mod appearance;
 mod common;
 mod form;
 mod media;
 mod other;
 
-use crate::grid::{AlignPattern, DrawUnit, Grid, Sides};
-use crate::markup::{AttrName, Attribute, Element, Mark, Page, VisionActionResult};
-use crate::parts::{Coord, Coord2D, FixedRect, Ordinal};
-use common::*;
-pub(crate) use form::{Button, Form, Inp, Opt, Pt, Select, Time};
-pub(crate) use media::{Audio, Img, Video};
-pub(crate) use other::{Canv, Iframe};
-use skia_safe::Canvas;
-use std::ops::{Deref, DerefMut};
+use self::appearance::*;
+use self::common::*;
+use self::form::*;
+use self::media::*;
+use self::other::*;
+use crate::global::*;
+use crate::markup::*;
+use crate::page::*;
+use crate::utils::*;
+use getset::{Getters, MutGetters};
+use skia_safe::Surface;
 use std::sync::{Arc, RwLock};
 
-///"Body" is grid layout.
+#[derive(Getters, MutGetters)]
 pub(crate) struct Body {
+    #[getset(get = "pub(crate)")]
     element: Arc<RwLock<Element>>,
-    subset: DrawUnitWrapperHolder,
-    zero: Coord,
-    side: Sides,
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    subset: DrawUnitHolder,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
     align_pattern: AlignPattern,
-    grid: Grid,
+    layout: LayoutCoord,
     scroll_bar: ScrollBar,
 }
 
@@ -32,11 +37,10 @@ impl std::fmt::Debug for Body {
         if let Ok(o) = self.element.try_read() {
             f.field("element", &o.to_string());
         }
-        f.field("zero", &self.zero)
-            .field("side", &self.side)
-            .field("background", &self.background)
+        f.field("rect", &self.rect)
+            .field("painter", &self.painter)
             .field("align_pattern", &self.align_pattern)
-            .field("grid", &self.grid)
+            .field("layout", &self.layout)
             .field("scroll_bar", &self.scroll_bar)
             .field("subset", &self.subset)
             .finish()
@@ -47,13 +51,12 @@ impl Body {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         let mut o = Self {
             element,
-            subset: DrawUnitWrapperHolder::new(),
-            zero: Coord::new(),
-            side: Sides::new(100, 100),
-            background: Box::new(Range::new()),
-            align_pattern: AlignPattern::left_middle(),
-            grid: Grid::new(),
-            scroll_bar: ScrollBar::new(),
+            subset: Default::default(),
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: Rectangle::default().into(),
+            align_pattern: Default::default(),
+            layout: Default::default(),
+            scroll_bar: Default::default(),
         };
         o.renew_subset();
         o
@@ -63,331 +66,334 @@ impl Body {
         renew_subset(&self.element, &mut self.subset);
     }
 
-    element!();
-
-    zero!();
-
-    pub(crate) fn resize(&mut self, w: isize, h: isize) {
-        self.side.reserve(w, h);
+    pub(crate) fn resize(&mut self, w: f32, h: f32) {
+        let k = RectSide::new(w, h);
+        self.rect.set_side(k.clone());
         if let Ok(e) = self.element.read() {
-            self.side.get_attr(&e);
-            self.grid.get_attr(&e, self.side.effect(), &self.zero);
+            self.rect.side_mut().get_attr(&e, &k);
+            self.layout.get_attr(&e, self.rect.clone());
         }
-        self.subset.resize(&mut self.grid);
+        self.subset.resize(&mut self.layout);
     }
 
-    pub(crate) fn draw(&mut self, canvas: &Canvas, page: &mut Page) {
-        let r = self.side.to_rect(&self.zero);
-        if r.is_empty() {
+    pub(crate) fn reset(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.rect.set_x(x);
+        self.rect.set_y(y);
+        self.resize(w, h);
+    }
+
+    pub(crate) fn draw(&mut self, mut t: DrawCtx) {
+        if self.rect.is_empty() {
             return;
         }
 
-        self.subset.pop_cursor(page);
+        t.surface.canvas().clear(*default_bg_color());
 
-        self.background.as_mut().act(&r, canvas);
-        canvas.save();
+        self.painter.draw(&self.rect, &mut t);
+        t.surface.canvas().save();
 
-        subset_draw(&mut self.subset, page, &mut self.scroll_bar, &r, canvas);
+        subset_draw(&mut self.subset, &self.rect, &mut self.scroll_bar, &mut t);
+        t.surface.canvas().save();
     }
 
-    pub(crate) fn find_wrapper(&mut self, e: Arc<RwLock<Element>>) -> Option<BodyOrWrapper> {
-        if Arc::as_ptr(&self.element) == Arc::as_ptr(&e) {
-            Some(BodyOrWrapper::BODY(self as *mut Self))
-        } else {
-            self.subset.find_wrapper(e)
-        }
-    }
-}
-
-fn renew_subset(element: &Arc<RwLock<Element>>, subset: &mut DrawUnitWrapperHolder) {
-    if let Ok(e) = element.read() {
-        for i in e.subset.iter() {
-            if let Ok(o) = i.read() {
-                let d = DrawUnitWrapper::new(&o.mark_type, i.clone());
-                subset.push(d)
+    pub(crate) fn consume_action(&mut self, mut t: ActionCtx) {
+        match &t.kind {
+            ActionKind::Click(c, _)
+            | ActionKind::DoubleClick(c, _)
+            | ActionKind::Cursor(c)
+            | ActionKind::CursorWithoutFocus(c)
+            | ActionKind::DeleteFront(c, _)
+            | ActionKind::DeleteBack(c, _) => {
+                if self.scroll_bar.within(c) {
+                    return;
+                }
             }
+            ActionKind::Sweep(a, b) => {
+                if self.scroll_bar.within(b) {
+                    self.scroll_bar.move_a_to_b(a, b);
+                    return;
+                }
+            }
+            ActionKind::InputStr(_) => {
+                return;
+            }
+            _ => {}
+        }
+        self.subset.consume_action(&mut t);
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
+            ActionKind::Click(c, _) | ActionKind::DoubleClick(c, _) => {
+                if let Some(o) = unsafe { o.as_mut() } {
+                    if o.rect.within(c) {}
+                }
+            }
+            _ => {}
         }
     }
 }
 
-///"Area" is grid layout.
-#[derive(Debug)]
+#[derive(Getters, MutGetters)]
 pub(crate) struct Area {
-    background: Box<dyn Painter>,
+    #[getset(get = "pub(crate)")]
+    element: Arc<RwLock<Element>>,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    subset: DrawUnitHolder,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    rect: FixedRect,
+    painter: AppearanceComposite,
     align_pattern: AlignPattern,
-    grid: Grid,
+    layout: LayoutCoord,
     scroll_bar: ScrollBar,
 }
 
-impl Area {
-    pub(crate) fn new() -> Self {
-        Self {
-            background: Box::new(Range::new()),
-            align_pattern: AlignPattern::left_middle(),
-            grid: Grid::new(),
-            scroll_bar: ScrollBar::new(),
-        }
-    }
-
-    pub(self) fn draw(&mut self, wrapper: &mut DrawUnitWrapper, page: &mut Page, canvas: &Canvas) {
-        let r = wrapper.rect();
-        self.background.as_mut().act(&r, canvas);
-        canvas.save();
-
-        subset_draw(wrapper.subset(), page, &mut self.scroll_bar, &r, canvas);
-    }
-}
-
-fn subset_draw(
-    subset: &mut DrawUnitWrapperHolder,
-    page: &mut Page,
-    scroll_bar: &mut ScrollBar,
-    r: &FixedRect,
-    canvas: &Canvas,
-) {
-    if let Some(mut surface) = unsafe { canvas.surface() } {
-        let right_bottom = if let Some(right_bottom) = subset.right_bottom() {
-            right_bottom
-        } else {
-            return;
-        };
-        let s = right_bottom.away_from(&r.pos);
-
-        if let Some((c, VisionActionResult::PressSweep(a))) = page.cursor.analyse() {
-            scroll_bar.cursor_move(c, &a);
-        }
-
-        let vision_start = scroll_bar.resize(&r, &s);
-        let rr = r.move_xy(vision_start.width, vision_start.height);
-        let info = surface.image_info().with_dimensions(rr.right_bottom());
-        if let Some(mut surface2) = surface.new_surface(&info) {
-            let canvas2 = surface2.canvas();
-            subset.draw(page, canvas2);
-
-            if let Some(image2) = surface2.image_snapshot_with_bounds(rr.to_irect()) {
-                canvas.draw_image(image2, r.pos.clone(), None);
-                scroll_bar.draw(canvas);
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum BodyOrWrapper {
-    BODY(*mut Body),
-    DRAWUNITWRAPPER(*mut DrawUnitWrapper),
-}
-
-//------------------------------------------------------------------------------------------
-
-pub(crate) struct DrawUnitWrapper {
-    element: Arc<RwLock<Element>>,
-    draw_unit: DrawUnit,
-    subset: DrawUnitWrapperHolder,
-    cursor: bool,
-    zero: Coord,
-    side: Sides,
-    hidden: bool,
-}
-
-impl std::fmt::Debug for DrawUnitWrapper {
+impl std::fmt::Debug for Area {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("DrawUnitWrapper");
+        let mut f = f.debug_struct("Area");
         if let Ok(o) = self.element.try_read() {
             f.field("element", &o.to_string());
         }
-        f.field("cursor", &self.cursor)
-            .field("zero", &self.zero)
-            .field("side", &self.side)
-            .field("hidden", &self.hidden)
-            .field("draw_unit", &self.draw_unit)
+        f.field("rect", &self.rect)
             .field("subset", &self.subset)
             .finish()
     }
 }
 
-impl DrawUnitWrapper {
-    pub(crate) fn new(mark_type: &Mark, element: Arc<RwLock<Element>>) -> Self {
+impl Area {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         let mut o = Self {
             element,
-            draw_unit: DrawUnit::from(mark_type),
-            subset: DrawUnitWrapperHolder::new(),
-            cursor: false,
-            zero: Coord::new(),
-            side: Sides::new(100, 100),
-            hidden: false,
+            subset: Default::default(),
+            rect: FixedRect::with_side(100.0, 100.0),
+            painter: Default::default(),
+            align_pattern: Default::default(),
+            layout: Default::default(),
+            scroll_bar: Default::default(),
         };
-        renew_subset(&o.element, &mut o.subset);
+        o.renew_subset();
         o
     }
 
-    pub(crate) fn subset(&mut self) -> &mut DrawUnitWrapperHolder {
-        &mut self.subset
+    pub(crate) fn renew_subset(&mut self) {
+        renew_subset(&self.element, &mut self.subset);
     }
 
-    element!();
-
-    pub(self) fn rect(&self) -> FixedRect {
-        self.side.to_rect(&self.zero)
+    pub(crate) fn resize(&mut self, c: &mut LayoutCoord) {
+        if let Ok(e) = self.element.read() {
+            self.rect.get_attr(&e, c);
+            self.layout.get_attr(&e, self.rect.clone());
+        }
+        self.subset.resize(&mut self.layout);
     }
 
-    fn is_empty(&self) -> bool {
-        self.side.effect().is_empty()
+    right_bottom!();
+
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        draw_check!(self);
+
+        self.painter.draw(&self.rect, t);
+        t.surface.canvas().save();
+
+        subset_draw(&mut self.subset, &self.rect, &mut self.scroll_bar, t);
     }
 
-    fn resize_subset(&mut self) {
-        match &mut self.draw_unit {
-            DrawUnit::AREA(o) => {
-                self.subset.resize(&mut o.grid);
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match &t.kind {
+            ActionKind::Click(c, _)
+            | ActionKind::DoubleClick(c, _)
+            | ActionKind::Cursor(c)
+            | ActionKind::CursorWithoutFocus(c)
+            | ActionKind::DeleteFront(c, _)
+            | ActionKind::DeleteBack(c, _) => {
+                if self.rect.within(c) {
+                    if self.scroll_bar.within(c) {
+                        t.finish = true;
+                        return;
+                    }
+                    return self.subset.consume_action(t);
+                }
             }
+            ActionKind::Sweep(a, b) => {
+                if self.scroll_bar.within(b) {
+                    self.scroll_bar.move_a_to_b(a, b);
+                    t.finish = true;
+                    return;
+                }
+                if self.rect.within(a) || self.rect.within(b) {
+                    return self.subset.consume_action(t);
+                }
+            }
+            ActionKind::InputStr(_) => {
+                t.finish = true;
+                return;
+            }
+            _ => {
+                return self.subset.consume_action(t);
+            }
+        }
+    }
+
+    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
+        let o = self as *mut Self;
+        move |a, context| match &a {
             _ => {}
         }
     }
+}
 
-    pub(crate) fn resize_grid(&mut self, xy: &mut Grid) {
-        if let Ok(e) = self.element.read() {
-            let a = if let Some(Attribute::ORDINAL(a)) = e.attribute.get(&AttrName::ORDINAL) {
-                a
+fn renew_subset(element: &Arc<RwLock<Element>>, subset: &mut DrawUnitHolder) {
+    if let Ok(e) = element.read() {
+        e.subset().iter().for_each(|i| {
+            if let Some(draw_unit) = DrawUnit::new(i.clone()) {
+                subset.push(draw_unit)
             } else {
-                &Ordinal::None
-            };
-            if let Some(r) = xy.next(&a) {
-                self.zero.from_2d(&r.pos);
-                self.side.replace(&r.side);
-            } else {
-                self.hidden = true;
+                renew_subset(i, subset)
             }
-            if let DrawUnit::AREA(o) = &mut self.draw_unit {
-                self.side.get_attr(&e);
-                o.grid.get_attr(&e, self.side.effect(), &self.zero);
+        })
+    }
+}
+
+fn subset_draw(
+    subset: &mut DrawUnitHolder,
+    rect: &FixedRect,
+    scroll_bar: &mut ScrollBar,
+    t: &mut DrawCtx,
+) {
+    if let Some(right_bottom) = subset.right_bottom() {
+        let max = RectSide::away_from(&right_bottom, rect);
+        let vision = scroll_bar.resize(rect, &max);
+        let surface = &mut t.surface;
+        let info = surface.image_info().with_dimensions(vision.right_bottom());
+        if let Some(surface2) = surface.new_surface(&info) {
+            let mut t2 = DrawCtx::new(surface2, t.context);
+            subset.draw(&mut t2);
+
+            if let Some(image2) = t2.surface.image_snapshot_with_bounds(vision.to_irect()) {
+                surface.canvas().draw_image(image2, &***rect, None);
+                scroll_bar.draw(t);
             }
-        }
-        if !self.hidden {
-            self.resize_subset();
         }
     }
+}
 
-    pub(crate) fn right_bottom(&self) -> Option<Coord2D> {
-        if self.hidden {
-            return None;
-        }
-        match &self.draw_unit {
-            DrawUnit::AREA(_)
-            | DrawUnit::AUDIO(_)
-            | DrawUnit::BUTTON(_)
-            | DrawUnit::CANVAS(_)
-            | DrawUnit::IFRAME(_)
-            | DrawUnit::IMG(_)
-            | DrawUnit::VIDEO(_) => Some(self.zero.move_rect_to_2d(self.side.effect())),
-            DrawUnit::INP(o) => Some(o.right_bottom()),
-            DrawUnit::OPTION(_) => None,
-            DrawUnit::PT(o) => Some(o.right_bottom()),
-            DrawUnit::SELECT(o) => Some(o.right_bottom()),
-            DrawUnit::TIME(o) => Some(o.right_bottom()),
+//------------------------------------------------------------------------------------------
+
+#[derive(Debug)]
+enum DrawUnit {
+    AREA(Area),
+    AUDIO(Audio),
+    BUTTON(Button),
+    CANVAS(Canv),
+    IFRAME(Iframe),
+    IMG(Img),
+    INP(Inp),
+    PT(Pt),
+    SELECT(Select),
+    TIME(Time),
+    VIDEO(Video),
+}
+
+impl DrawUnit {
+    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Option<Self> {
+        let e = element.read().ok()?;
+        let mark_type = e.mark_type().clone();
+        drop(e);
+        match mark_type {
+            Mark::AREA => Some(Self::AREA(Area::new(element))),
+            Mark::AUDIO => Some(Self::AUDIO(Audio::new(element))),
+            Mark::BUTTON => Some(Self::BUTTON(Button::new(element))),
+            Mark::CANVAS => Some(Self::CANVAS(Canv::new(element))),
+            Mark::IFRAME => Some(Self::IFRAME(Iframe::new(element))),
+            Mark::IMG => Some(Self::IMG(Img::new(element))),
+            Mark::INP => Some(Self::INP(Inp::new(element))),
+            Mark::PT => Some(Self::PT(Pt::new(element))),
+            Mark::SELECT => Some(Self::SELECT(Select::new(element))),
+            Mark::TIME => Some(Self::TIME(Time::new(element))),
+            Mark::VIDEO => Some(Self::VIDEO(Video::new(element))),
             _ => None,
         }
     }
 
-    fn pop_cursor(&mut self, page: &mut Page) -> bool {
-        self.cursor = false;
-        if let Some(c) = page.cursor.position() {
-            if self.rect().within(c) {
-                self.cursor = true;
-                return true;
-            }
+    pub(crate) fn resize(&mut self, c: &mut LayoutCoord) {
+        match self {
+            Self::AREA(o) => o.resize(c),
+            Self::AUDIO(o) => o.resize(c),
+            Self::BUTTON(o) => o.resize(c),
+            Self::CANVAS(o) => o.resize(c),
+            Self::IFRAME(o) => o.resize(c),
+            Self::IMG(o) => o.resize(c),
+            Self::INP(o) => o.resize(c),
+            Self::PT(o) => o.resize(c),
+            Self::SELECT(o) => o.resize(c),
+            Self::TIME(o) => o.resize(c),
+            Self::VIDEO(o) => o.resize(c),
         }
-        false
     }
 
-    pub(crate) fn draw(&mut self, page: &mut Page, canvas: &Canvas) -> bool {
-        if self.hidden {
-            return false;
+    pub(crate) fn right_bottom(&self) -> Option<Coord2D> {
+        match self {
+            Self::AREA(o) => o.right_bottom(),
+            Self::AUDIO(o) => o.right_bottom(),
+            Self::BUTTON(o) => o.right_bottom(),
+            Self::CANVAS(o) => o.right_bottom(),
+            Self::IFRAME(o) => o.right_bottom(),
+            Self::IMG(o) => o.right_bottom(),
+            Self::INP(o) => o.right_bottom(),
+            Self::PT(o) => o.right_bottom(),
+            Self::SELECT(o) => o.right_bottom(),
+            Self::TIME(o) => o.right_bottom(),
+            Self::VIDEO(o) => o.right_bottom(),
         }
-        if let Ok(e) = self.element.read() {
-            if let Some(Attribute::HIDDEN(a)) = e.attribute.get(&AttrName::HIDDEN) {
-                if *a {
-                    return false;
-                }
-            }
+    }
 
-            if let Some(Attribute::DISABLED(a)) = e.attribute.get(&AttrName::DISABLED) {
-                if *a {
-                    return false;
-                }
-            }
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        match self {
+            Self::AREA(o) => o.draw(t),
+            Self::AUDIO(o) => o.draw(t),
+            Self::BUTTON(o) => o.draw(t),
+            Self::CANVAS(o) => o.draw(t),
+            Self::IFRAME(o) => o.draw(t),
+            Self::IMG(o) => o.draw(t),
+            Self::INP(o) => o.draw(t),
+            Self::PT(o) => o.draw(t),
+            Self::SELECT(o) => o.draw(t),
+            Self::TIME(o) => o.draw(t),
+            Self::VIDEO(o) => o.draw(t),
         }
+    }
 
-        if self.is_empty() {
-            return false;
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
+        match self {
+            Self::AREA(o) => o.consume_action(t),
+            Self::AUDIO(o) => o.consume_action(t),
+            Self::BUTTON(o) => o.consume_action(t),
+            Self::CANVAS(o) => o.consume_action(t),
+            Self::IFRAME(o) => o.consume_action(t),
+            Self::IMG(o) => o.consume_action(t),
+            Self::INP(o) => o.consume_action(t),
+            Self::PT(o) => o.consume_action(t),
+            Self::SELECT(o) => o.consume_action(t),
+            Self::TIME(o) => o.consume_action(t),
+            Self::VIDEO(o) => o.consume_action(t),
         }
-
-        let p = self as *mut Self;
-        match &mut self.draw_unit {
-            DrawUnit::AREA(o) => {
-                o.draw(unsafe { &mut *p }, page, canvas);
-            }
-            DrawUnit::AUDIO(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-            }
-            DrawUnit::BUTTON(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::CANVAS(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::IFRAME(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::IMG(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::INP(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::OPTION(_) => {}
-            DrawUnit::PT(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::SELECT(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::TIME(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            DrawUnit::VIDEO(o) => {
-                o.draw(canvas, page, unsafe { &mut *p });
-                self.subset.draw(page, canvas);
-            }
-            _ => {}
-        }
-        false
     }
 }
 
-pub(crate) struct DrawUnitWrapperHolder(Vec<DrawUnitWrapper>);
+#[derive(Default)]
+struct DrawUnitHolder(Vec<DrawUnit>);
 
-impl std::fmt::Debug for DrawUnitWrapperHolder {
+impl std::fmt::Debug for DrawUnitHolder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(&self.0).finish()
     }
 }
 
-impl DrawUnitWrapperHolder {
-    fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    pub(crate) fn resize(&mut self, xy: &mut Grid) {
+impl DrawUnitHolder {
+    pub(crate) fn resize(&mut self, c: &mut LayoutCoord) {
         for i in self.0.iter_mut() {
-            i.resize_grid(xy);
+            i.resize(c);
         }
     }
 
@@ -396,11 +402,11 @@ impl DrawUnitWrapperHolder {
         for i in self.0.iter() {
             if let Some(r) = i.right_bottom() {
                 if let Some(c) = c.as_mut() {
-                    if c.x < r.x {
-                        c.x = r.x;
+                    if c.x() < r.x() {
+                        c.set_x(r.x());
                     }
-                    if c.y < r.y {
-                        c.y = r.y;
+                    if c.y() < r.y() {
+                        c.set_y(r.y());
                     }
                 } else {
                     c.replace(r);
@@ -410,45 +416,54 @@ impl DrawUnitWrapperHolder {
         c
     }
 
-    pub(crate) fn pop_cursor(&mut self, page: &mut Page) -> bool {
+    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+        for e in self.0.iter_mut() {
+            e.draw(t);
+        }
+    }
+
+    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
         let mut v = self.0.iter_mut();
         while let Some(i) = v.next_back() {
-            if i.pop_cursor(page) {
-                return true;
+            i.consume_action(t);
+            if t.finish {
+                return;
             }
         }
-        false
-    }
-
-    pub(crate) fn draw(&mut self, page: &mut Page, canvas: &Canvas) {
-        for e in self.0.iter_mut() {
-            e.draw(page, canvas);
-            e.cursor = false;
-        }
-    }
-
-    pub(crate) fn find_wrapper(&mut self, p: Arc<RwLock<Element>>) -> Option<BodyOrWrapper> {
-        for e in self.0.iter_mut() {
-            if Arc::as_ptr(&e.element) == Arc::as_ptr(&p) {
-                return Some(BodyOrWrapper::DRAWUNITWRAPPER(e));
-            } else if let Some(e) = e.subset.find_wrapper(p.clone()) {
-                return Some(e);
-            }
-        }
-        None
     }
 }
 
-impl Deref for DrawUnitWrapperHolder {
-    type Target = Vec<DrawUnitWrapper>;
+deref!(DrawUnitHolder, Vec<DrawUnit>, 0);
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+pub(crate) struct DrawCtx<'a> {
+    surface: Surface,
+    context: &'a mut PageContext,
+}
+
+impl<'a> DrawCtx<'a> {
+    pub(crate) fn new(surface: Surface, context: &'a mut PageContext) -> Self {
+        Self { surface, context }
     }
 }
 
-impl DerefMut for DrawUnitWrapperHolder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+pub(crate) struct ActionCtx<'a> {
+    kind: ActionKind,
+    context: &'a mut PageContext,
+    finish: bool,
+    callback: &'a mut Vec<Box<dyn FnMut(&ActionKind, &mut PageContext)>>,
+}
+
+impl<'a> ActionCtx<'a> {
+    pub(crate) fn new(
+        kind: ActionKind,
+        context: &'a mut PageContext,
+        callback: &'a mut Vec<Box<dyn FnMut(&ActionKind, &mut PageContext)>>,
+    ) -> Self {
+        Self {
+            kind,
+            context,
+            finish: false,
+            callback,
+        }
     }
 }
