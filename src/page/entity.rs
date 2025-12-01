@@ -1,0 +1,260 @@
+use super::*;
+use getset::{CopyGetters, Getters, MutGetters, Setters};
+use std::sync::{Arc, RwLock};
+
+///Represents page.
+pub struct Page {
+    context: PageContext,
+    head: Head,
+    body: Body,
+    style: Style,
+    script: Script,
+    callback: Vec<Box<dyn FnMut(&ActionKind, &mut PageContext)>>,
+}
+
+deref!(Page, PageContext, context);
+
+impl std::fmt::Debug for Page {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Page")
+            .field("head", &self.head)
+            .field("body", &self.body)
+            .field("style", &self.style)
+            .field("script", &self.script)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Page {
+    pub(crate) fn new(
+        root: Element,
+        head_element: Arc<RwLock<Element>>,
+        body_element: Arc<RwLock<Element>>,
+        style_element: Arc<RwLock<Element>>,
+        script_element: Arc<RwLock<Element>>,
+    ) -> Self {
+        let head = Head::new(head_element.clone());
+        let body = Body::new(body_element.clone());
+        let style = Style::new(style_element.clone());
+        let script = Script::new(script_element.clone());
+        let mut page = Self {
+            context: PageContext::new(
+                root,
+                head_element,
+                body_element,
+                style_element,
+                script_element,
+            ),
+            head,
+            body,
+            style,
+            script,
+            callback: Default::default(),
+        };
+        page.style.build(&mut page.context);
+        page.script.run(&mut page.context);
+        page
+    }
+
+    pub(crate) fn renew(&mut self) {
+        self.head = Head::new(self.head_element.clone());
+        self.body = Body::new(self.body_element.clone());
+        self.style = Style::new(self.style_element.clone());
+        self.script = Script::new(self.script_element.clone());
+        self.style.build(&mut self.context);
+        self.script.run(&mut self.context);
+    }
+
+    ///Parse a string slice.
+    pub fn parse(buf: &str) -> (Option<Self>, ErrorHolder) {
+        let (e, mut err) = Element::parse_one(buf);
+        let p = e
+            .map(|e| {
+                e.to_page()
+                    .map_err(|_| err.push(ErrorKind::InvalidMark.into()))
+                    .ok()
+            })
+            .flatten();
+        (p, err)
+    }
+
+    ///Reset width and height, each number is not equal to the size of window if the coordinate is not 0.0
+    pub fn resize(&mut self, width: f32, height: f32) {
+        self.body.resize(width, height);
+    }
+
+    ///Reset zero point on rectangular coordinates and size. `resize`
+    pub fn reset(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        self.body.reset(x, y, width, height);
+    }
+
+    pub(crate) fn draw_body(&mut self, surface: skia_safe::Surface) {
+        self.body.draw(DrawCtx::new(surface, &mut self.context));
+    }
+
+    ///Receive a action.
+    pub fn receive_action(&mut self, a: ActionKind) {
+        for f in &mut self.callback {
+            f(&a, &mut self.context);
+        }
+
+        if let Some(a) = self.context.consume_action(a) {
+            let o = ActionCtx::new(a, &mut self.context, &mut self.callback);
+            self.body.consume_action(o);
+        }
+    }
+}
+
+///Represents the context of page.
+#[derive(CopyGetters, Getters, MutGetters, Setters)]
+pub struct PageContext {
+    root: Arc<RwLock<Element>>,
+    #[getset(get = "pub")]
+    head_element: Arc<RwLock<Element>>,
+    #[getset(get = "pub")]
+    body_element: Arc<RwLock<Element>>,
+    #[getset(get = "pub")]
+    style_element: Arc<RwLock<Element>>,
+    #[getset(get = "pub")]
+    script_element: Arc<RwLock<Element>>,
+    #[getset(get_copy = "pub", set = "pub")]
+    scale_factor: f32,
+    input_to: Option<Arc<RwLock<Element>>>,
+}
+
+impl PageContext {
+    fn new(
+        root: Element,
+        head_element: Arc<RwLock<Element>>,
+        body_element: Arc<RwLock<Element>>,
+        style_element: Arc<RwLock<Element>>,
+        script_element: Arc<RwLock<Element>>,
+    ) -> Self {
+        Self {
+            root: Arc::new(RwLock::new(root)),
+            head_element,
+            body_element,
+            style_element,
+            script_element,
+            scale_factor: 1.0,
+            input_to: None,
+        }
+    }
+
+    ///Find `Element` references by `Mark`.
+    pub fn find_mark(&mut self, s: Mark) -> Vec<Arc<RwLock<Element>>> {
+        self.find(s)
+    }
+
+    ///Find `Element` references by class.
+    pub fn find_class(&mut self, s: &str) -> Vec<Arc<RwLock<Element>>> {
+        self.find(Condition::CLASS(s))
+    }
+
+    ///Find `Element` references by id.
+    pub fn find_id(&mut self, s: &str) -> Option<Arc<RwLock<Element>>> {
+        let mut v = self.find(Condition::ID(s));
+        if v.is_empty() {
+            None
+        } else {
+            Some(v.remove(0))
+        }
+    }
+
+    ///Find `Element` references by `Conditions`.
+    pub fn find<'a>(&mut self, conditions: impl Into<Conditions<'a>>) -> Vec<Arc<RwLock<Element>>> {
+        let v = vec![self.root.clone()];
+        find_elements(v, conditions.into())
+    }
+
+    ///Find `Element` in body.
+    pub fn find_in_body<'a>(
+        &mut self,
+        conditions: impl Into<Conditions<'a>>,
+    ) -> Vec<Arc<RwLock<Element>>> {
+        let v = vec![self.body_element.clone()];
+        find_elements(v, conditions.into())
+    }
+
+    pub(crate) fn set_input_to(&mut self, a: Arc<RwLock<Element>>) {
+        self.input_to.replace(a);
+    }
+
+    pub(crate) fn take_input_to(&mut self) {
+        self.input_to.take();
+    }
+
+    fn consume_action(&mut self, a: ActionKind) -> Option<ActionKind> {
+        match &a {
+            ActionKind::Click(_, _) => {
+                self.input_to.take();
+            }
+            ActionKind::DoubleClick(_, _) => {}
+            ActionKind::Focused(o) => {
+                if !o {
+                    self.input_to.take();
+                }
+            }
+            ActionKind::Cursor(_) => {}
+            ActionKind::CursorWithoutFocus(_) => {}
+            ActionKind::CursorEntered => {}
+            ActionKind::CursorLeft => {}
+            ActionKind::InputStr(s) => {
+                if s.len() > 0 {
+                    if let Some(o) = &mut self.input_to {
+                        if let Ok(mut e) = o.try_write() {
+                            if let Some(a) = e.attribute_mut().value_or_insert() {
+                                a.push_str(&s);
+                            }
+                        }
+                    }
+                }
+                return None;
+            }
+            ActionKind::DeleteFront(_, mut n) => {
+                if let Some(o) = &mut self.input_to {
+                    if let Ok(mut e) = o.try_write() {
+                        if let Some(a) = e.attribute_mut().value_or_insert() {
+                            while n > 0 {
+                                a.pop();
+                                n -= 1;
+                            }
+                        }
+                    }
+                }
+                return None;
+            }
+            ActionKind::DeleteBack(_, mut n) => {
+                if let Some(o) = &mut self.input_to {
+                    if let Ok(mut e) = o.try_write() {
+                        if let Some(a) = e.attribute_mut().value_or_insert() {
+                            while n > 0 {
+                                a.pop();
+                                n -= 1;
+                            }
+                        }
+                    }
+                }
+                return None;
+            }
+            ActionKind::Sweep(_, _) => {}
+        }
+        Some(a)
+    }
+}
+
+///Represents the kind of action.
+#[derive(Clone, Debug)]
+pub enum ActionKind {
+    Click(Coord2D, u8),
+    DoubleClick(Coord2D, u8),
+    Focused(bool),
+    Cursor(Coord2D),
+    CursorWithoutFocus(Coord2D),
+    CursorEntered,
+    CursorLeft,
+    InputStr(String),
+    DeleteFront(Coord2D, u32),
+    DeleteBack(Coord2D, u32),
+    Sweep(Coord2D, Coord2D),
+}
