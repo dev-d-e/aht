@@ -1,11 +1,15 @@
+/*!
+A module for global configuration.
+*/
+
 mod color;
 mod font;
-mod net;
 
+use crate::markup::*;
+use crate::utils::*;
 pub(crate) use color::*;
 pub(crate) use font::*;
-use net::*;
-use skia_safe::{Color, Font};
+use skia_safe::Font;
 
 ///InitialFont
 pub struct InitialFont(Font, Option<Color>);
@@ -20,14 +24,6 @@ impl InitialFont {
         if let Some(color) = self.1 {
             set_default_font_color(color);
         }
-    }
-}
-
-///InitialNet
-pub struct InitialNet;
-
-impl InitialNet {
-    pub fn initialize(o: impl Net) {
-        set_default_net(o);
+        info!("initial font");
     }
 }
