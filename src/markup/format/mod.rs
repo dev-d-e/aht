@@ -1,10 +1,9 @@
 mod x;
 
-use self::x::{Context, XParser};
-use super::{AttrName, Attribute, Element, Mark};
+use self::x::*;
+use super::*;
 use crate::utils::ascii::*;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, RwLock};
 
 #[inline]
 fn is_crlf(c: char) -> bool {
@@ -12,11 +11,17 @@ fn is_crlf(c: char) -> bool {
 }
 
 #[derive(Debug)]
-struct UnclearElement {
-    key: String,
-    text: String,
-    attribute: HashMap<String, Option<String>>,
-    subset: VecDeque<UnclearElement>,
+pub(super) struct UnclearElement {
+    pub(super) key: String,
+    pub(super) text: String,
+    pub(super) attribute: HashMap<String, Option<String>>,
+    pub(super) subset: VecDeque<Self>,
+}
+
+impl Default for UnclearElement {
+    fn default() -> Self {
+        Self::new(String::new())
+    }
 }
 
 impl UnclearElement {
@@ -27,10 +32,6 @@ impl UnclearElement {
             attribute: HashMap::new(),
             subset: VecDeque::new(),
         }
-    }
-
-    fn empty() -> Self {
-        Self::new(String::new())
     }
 
     fn push_text(&mut self, step: usize, s: &str) {
@@ -53,66 +54,15 @@ impl UnclearElement {
         }
     }
 
-    fn add_subset(&mut self, step: usize, n: UnclearElement) -> Option<*mut UnclearElement> {
+    fn add_subset(&mut self, step: usize, n: Self) -> Option<*mut Self> {
         if step == 0 {
             self.subset.push_back(n);
-            self.subset.back_mut().map(|p| p as *mut UnclearElement)
+            self.subset.back_mut().map(|p| p as *mut Self)
         } else if let Some(o) = self.subset.back_mut() {
             o.add_subset(step - 1, n)
         } else {
             None
         }
-    }
-
-    fn to_check(self) -> Option<CheckElement> {
-        Mark::from(&self.key).map(|k| {
-            let mut e = CheckElement::new(k, self.text);
-            for (k, s) in self.attribute.into_iter() {
-                match Attribute::from(&k, s) {
-                    Ok(a) => {
-                        e.attribute.insert(a.name(), a);
-                    }
-                    Err(_) => {}
-                }
-            }
-            for o in self.subset.into_iter() {
-                if let Some(t) = o.to_check() {
-                    e.subset.push(t);
-                }
-            }
-            e
-        })
-    }
-}
-
-#[derive(Debug)]
-struct CheckElement {
-    mark_type: Mark,
-    text: String,
-    attribute: HashMap<AttrName, Attribute>,
-    subset: Vec<CheckElement>,
-}
-
-impl CheckElement {
-    fn new(mark_type: Mark, text: String) -> Self {
-        Self {
-            mark_type,
-            text,
-            attribute: HashMap::new(),
-            subset: Vec::new(),
-        }
-    }
-
-    fn to_element(self) -> Option<Element> {
-        let mut e = Element::new(self.mark_type, self.text);
-        e.attribute.extend(self.attribute);
-        for o in self.subset.into_iter() {
-            if let Some(t) = o.to_element() {
-                e.subset.push_back(Arc::new(RwLock::new(t)));
-            }
-        }
-        e.subset_upper();
-        Some(e)
     }
 }
 
@@ -121,18 +71,22 @@ struct Builder {
     rst: UnclearElement,
     last_one: Option<*mut UnclearElement>,
     last_step: usize,
+    error: ErrorHolder,
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            temporary: Vec::new(),
+            rst: Default::default(),
+            last_one: None,
+            last_step: 0,
+            error: Default::default(),
+        }
+    }
 }
 
 impl Builder {
-    pub(crate) fn new() -> Self {
-        Self {
-            temporary: Vec::new(),
-            rst: UnclearElement::empty(),
-            last_one: None,
-            last_step: 0,
-        }
-    }
-
     fn step(&mut self) -> usize {
         self.temporary.len().saturating_sub(1)
     }
@@ -153,11 +107,11 @@ impl Builder {
         None
     }
 
-    fn build(buf: &str) -> VecDeque<UnclearElement> {
-        let mut parser = Builder::new();
+    fn build(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
+        let mut parser = Builder::default();
         let mut context = Context::new(&mut parser);
         x::accept(&mut context, &buf);
-        parser.rst.subset
+        (parser.rst.subset, parser.error)
     }
 }
 
@@ -214,17 +168,13 @@ impl XParser for Builder {
         }
     }
 
-    fn error(&mut self, n: usize) {
-        println!("error {}", n);
+    fn error(&mut self, e: Error) {
+        self.error.push(e)
     }
 }
 
-pub(super) fn accept(buf: &str) -> VecDeque<Element> {
+pub(super) fn accept(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
     Builder::build(buf)
-        .into_iter()
-        .filter_map(|o| o.to_check())
-        .filter_map(|o| o.to_element())
-        .collect()
 }
 
 #[cfg(test)]
