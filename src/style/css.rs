@@ -1,6 +1,4 @@
-use crate::content::BodyOrWrapper;
-use crate::markup::{Attribute, Conditions, Mark, Page};
-use crate::parts::Distance;
+use super::*;
 use lightningcss::properties::custom::{
     CustomProperty, CustomPropertyName, TokenList, TokenOrValue,
 };
@@ -13,54 +11,55 @@ use lightningcss::stylesheet::{MinifyOptions, ParserOptions, PrinterOptions, Sty
 use lightningcss::traits::ToCss;
 use lightningcss::values::length::LengthValue;
 use lightningcss::values::percentage::DimensionPercentage;
+use std::sync::{Arc, RwLock};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct CssParser {}
 
 impl CssParser {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-
-    pub(crate) fn parse(&mut self, s: &str, page: &mut Page) {
+    pub(crate) fn parse(&mut self, s: &str, context: &mut PageContext) {
         match StyleSheet::parse(s, ParserOptions::default()) {
             Ok(mut stylesheet) => {
-                if let Err(_) = stylesheet.minify(MinifyOptions::default()) {}
+                if let Err(e) = stylesheet.minify(MinifyOptions::default()) {
+                    error!("{e}");
+                }
                 for r in &stylesheet.rules.0 {
-                    css_rule(r, page)
+                    css_rule(r, context)
                 }
             }
-            Err(_) => {}
+            Err(e) => {
+                error!("{e}");
+            }
         };
     }
 }
 
 #[inline]
-fn css_rule(r: &CssRule, page: &mut Page) {
+fn css_rule(r: &CssRule, context: &mut PageContext) {
     match r {
         CssRule::Style(o) => {
-            style_rule(o, page);
+            style_rule(o, context);
         }
         _ => {}
     }
 }
 
 #[inline]
-fn style_rule(o: &StyleRule, page: &mut Page) {
+fn style_rule(o: &StyleRule, context: &mut PageContext) {
     if let Some(c) = o.selectors.0.iter().find_map(|s| selector(s)) {
-        let mut vec = find_draw(c, page);
+        let vec = context.find_in_body(c);
         if vec.is_empty() {
             return;
         }
         for d in &o.declarations.declarations {
-            property(d, &mut vec);
+            property(d, &vec);
         }
     }
 }
 
 #[inline]
-fn selector(s: &Selector) -> Option<Conditions> {
-    let mut c = Conditions::new();
+fn selector<'a>(s: &'a Selector) -> Option<Conditions<'a>> {
+    let mut c = Conditions::default();
     for a in s.iter_raw_match_order() {
         match a {
             Component::Class(o) => {
@@ -71,7 +70,7 @@ fn selector(s: &Selector) -> Option<Conditions> {
                 c.id(o.as_ref());
             }
             Component::LocalName(o) => {
-                if let Some(m) = Mark::from(&o.lower_name) {
+                if let Ok(m) = Mark::try_from(o.lower_name.as_ref()) {
                     c.mark(m);
                 }
             }
@@ -87,38 +86,30 @@ fn selector(s: &Selector) -> Option<Conditions> {
 }
 
 #[inline]
-fn find_draw(c: Conditions, page: &mut Page) -> Vec<BodyOrWrapper> {
-    let elements = page.find_in_body(c);
-    let body = page.body();
-    elements
-        .into_iter()
-        .filter_map(|e| body.find_wrapper(e))
-        .collect()
-}
-
-#[inline]
-fn property(p: &Property, wrappers: &mut Vec<BodyOrWrapper>) {
+fn property(p: &Property, vec: &Vec<Arc<RwLock<Element>>>) {
     match p {
         Property::Custom(o) => {
-            property_custom(o, wrappers);
+            property_custom(o, vec);
         }
         Property::Height(o) => {
-            property_height(o, wrappers);
+            property_height(o, vec);
         }
         Property::Width(o) => {
-            property_width(o, wrappers);
+            property_width(o, vec);
         }
         _ => {}
     }
 }
 
 #[inline]
-fn property_custom(c: &CustomProperty, wrappers: &mut Vec<BodyOrWrapper>) {
+fn property_custom(c: &CustomProperty, vec: &Vec<Arc<RwLock<Element>>>) {
     let n = custom_property_name(&c.name);
-    let v = custom_property_value(&c.value);
-    for wrapper in wrappers.iter_mut() {
-        if let Ok(a) = Attribute::from(&n, Some(v.clone())) {
-            set_attribute(a, wrapper);
+    let mut v = custom_property_value(&c.value);
+    if let Ok(n) = AttrName::try_from(&n) {
+        if let Ok(a) = Attribute::from(&n, &mut v) {
+            for e in vec {
+                set_attribute(a.clone(), e);
+            }
         }
     }
 }
@@ -163,22 +154,22 @@ fn custom_property_value(value: &TokenList) -> String {
 }
 
 #[inline]
-fn property_height(s: &Size, wrappers: &mut Vec<BodyOrWrapper>) {
+fn property_height(s: &Size, vec: &Vec<Arc<RwLock<Element>>>) {
     match s {
         Size::LengthPercentage(o) => match o {
             DimensionPercentage::Dimension(d) => match d {
                 LengthValue::Px(n) => {
-                    let n = *n as isize;
-                    for wrapper in wrappers {
-                        set_attribute(Attribute::HEIGHT(Distance::Pixel(n)), wrapper);
+                    let n = *n;
+                    for e in vec {
+                        set_attribute(Attribute::HEIGHT(Distance::Pixel(n)), e);
                     }
                 }
                 _ => {}
             },
             DimensionPercentage::Percentage(d) => {
-                for wrapper in wrappers {
-                    let n = d.0 as usize;
-                    set_attribute(Attribute::HEIGHT(Distance::Percentage(n)), wrapper);
+                let n = d.0;
+                for e in vec {
+                    set_attribute(Attribute::HEIGHT(Distance::Percentage(n)), e);
                 }
             }
             DimensionPercentage::Calc(_) => {}
@@ -188,22 +179,22 @@ fn property_height(s: &Size, wrappers: &mut Vec<BodyOrWrapper>) {
 }
 
 #[inline]
-fn property_width(s: &Size, wrappers: &mut Vec<BodyOrWrapper>) {
+fn property_width(s: &Size, vec: &Vec<Arc<RwLock<Element>>>) {
     match s {
         Size::LengthPercentage(o) => match o {
             DimensionPercentage::Dimension(d) => match d {
                 LengthValue::Px(n) => {
-                    let n = *n as isize;
-                    for wrapper in wrappers {
-                        set_attribute(Attribute::WIDTH(Distance::Pixel(n)), wrapper);
+                    let n = *n;
+                    for e in vec {
+                        set_attribute(Attribute::WIDTH(Distance::Pixel(n)), e);
                     }
                 }
                 _ => {}
             },
             DimensionPercentage::Percentage(d) => {
-                for wrapper in wrappers {
-                    let n = d.0 as usize;
-                    set_attribute(Attribute::WIDTH(Distance::Percentage(n)), wrapper);
+                let n = d.0;
+                for e in vec {
+                    set_attribute(Attribute::WIDTH(Distance::Percentage(n)), e);
                 }
             }
             DimensionPercentage::Calc(_) => {}
@@ -213,21 +204,8 @@ fn property_width(s: &Size, wrappers: &mut Vec<BodyOrWrapper>) {
 }
 
 #[inline]
-fn set_attribute(a: Attribute, o: &mut BodyOrWrapper) {
-    match o {
-        BodyOrWrapper::BODY(o) => unsafe {
-            if let Some(o) = o.as_mut() {
-                if let Ok(mut e) = o.element().write() {
-                    e.attribute.insert(a.name(), a);
-                }
-            }
-        },
-        BodyOrWrapper::DRAWUNITWRAPPER(o) => unsafe {
-            if let Some(o) = o.as_mut() {
-                if let Ok(mut e) = o.element().write() {
-                    e.attribute.insert(a.name(), a);
-                }
-            }
-        },
+fn set_attribute(a: Attribute, e: &Arc<RwLock<Element>>) {
+    if let Ok(mut e) = e.write() {
+        e.attribute_insert(a);
     }
 }
