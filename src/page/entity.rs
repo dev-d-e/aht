@@ -141,41 +141,6 @@ impl PageContext {
         }
     }
 
-    ///Find `Element` references by `Mark`.
-    pub fn find_mark(&mut self, s: Mark) -> Vec<Arc<RwLock<Element>>> {
-        self.find(s)
-    }
-
-    ///Find `Element` references by class.
-    pub fn find_class(&mut self, s: &str) -> Vec<Arc<RwLock<Element>>> {
-        self.find(Condition::CLASS(s))
-    }
-
-    ///Find `Element` references by id.
-    pub fn find_id(&mut self, s: &str) -> Option<Arc<RwLock<Element>>> {
-        let mut v = self.find(Condition::ID(s));
-        if v.is_empty() {
-            None
-        } else {
-            Some(v.remove(0))
-        }
-    }
-
-    ///Find `Element` references by `Conditions`.
-    pub fn find<'a>(&mut self, conditions: impl Into<Conditions<'a>>) -> Vec<Arc<RwLock<Element>>> {
-        let v = vec![self.root.clone()];
-        find_elements(v, conditions.into())
-    }
-
-    ///Find `Element` in body.
-    pub fn find_in_body<'a>(
-        &mut self,
-        conditions: impl Into<Conditions<'a>>,
-    ) -> Vec<Arc<RwLock<Element>>> {
-        let v = vec![self.body_element.clone()];
-        find_elements(v, conditions.into())
-    }
-
     pub(crate) fn set_input_to(&mut self, a: Arc<RwLock<Element>>) {
         self.input_to.replace(a);
     }
