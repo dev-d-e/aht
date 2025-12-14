@@ -1,112 +1,289 @@
 use super::*;
+use getset::{CopyGetters, Setters};
 use std::sync::{Arc, RwLock};
 
-///Represents find condition.
-#[derive(Debug)]
-pub enum Condition<'a> {
-    MARK(Mark),
-    CLASS(&'a str),
-    ID(&'a str),
+///Represents requirement of searching elements.
+pub trait Requirement {
+    fn satisfy(&self, e: &Element) -> bool;
 }
 
-///Represents find conditions.
-#[derive(Debug, Default)]
-pub struct Conditions<'a>(Vec<Condition<'a>>);
-
-impl<'a> Conditions<'a> {
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn mark(&mut self, s: Mark) {
-        self.0.push(Condition::MARK(s));
-    }
-
-    pub fn class(&mut self, s: &'a str) {
-        self.0.push(Condition::CLASS(s))
-    }
-
-    pub fn id(&mut self, s: &'a str) {
-        self.0.push(Condition::ID(s))
-    }
-
-    pub fn reverse(&mut self) {
-        self.0.reverse()
-    }
+///Represents searching elements in descendant.
+#[derive(Debug, CopyGetters, Setters)]
+pub struct FindDescendant<T>
+where
+    T: Requirement,
+{
+    f: T,
+    #[getset(get_copy = "pub", set = "pub")]
+    n: usize,
+    i: usize,
 }
 
-impl<'a> From<Condition<'a>> for Conditions<'a> {
-    fn from(c: Condition<'a>) -> Self {
-        Self(vec![c])
+impl<T> FindDescendant<T>
+where
+    T: Requirement,
+{
+    ///Creates a new instance. `n` is nesting number, searches all descendant if it's 0.
+    pub fn new(f: T, n: usize) -> Self {
+        Self { f, n, i: n }
     }
-}
 
-impl<'a> From<Mark> for Conditions<'a> {
-    fn from(o: Mark) -> Self {
-        Self::from(Condition::MARK(o))
-    }
-}
-
-pub(crate) fn find_elements(
-    mut v: Vec<Arc<RwLock<Element>>>,
-    conditions: Conditions,
-) -> Vec<Arc<RwLock<Element>>> {
-    for c in conditions.0 {
-        let mut r = Vec::new();
-        match c {
-            Condition::MARK(s) => {
-                v.into_iter().for_each(|k| find_mark(k, &s, &mut r));
+    fn all(&self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
+        if let Ok(e) = o.read() {
+            if self.f.satisfy(&e) {
+                v.push(o.clone())
             }
-            Condition::CLASS(s) => {
-                v.into_iter().for_each(|k| find_class(k, s, &mut r));
+            e.subset().iter().for_each(|k| self.all(k, v));
+        }
+    }
+
+    fn subtract(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
+        self.i -= 1;
+        if let Ok(e) = o.read() {
+            if self.f.satisfy(&e) {
+                v.push(o.clone())
             }
-            Condition::ID(s) => {
-                for k in v {
-                    if let Some(p) = find_id(k, s) {
-                        r.push(p);
-                        break;
-                    }
+            if self.i > 0 {
+                e.subset().iter().for_each(|k| self.subtract(k, v));
+            }
+        }
+    }
+
+    ///Gets elements that satisfy the requirements by an element to the vec.
+    pub fn find(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
+        if self.n == 0 {
+            self.all(o, v)
+        } else {
+            self.i = self.n;
+            self.subtract(o, v)
+        }
+    }
+
+    ///Returns unique element that satisfy the requirements by an element.
+    pub fn find_unique(&mut self, o: &Arc<RwLock<Element>>) -> Option<Arc<RwLock<Element>>> {
+        if let Ok(e) = o.read() {
+            if self.f.satisfy(&e) {
+                return Some(o.clone());
+            }
+            return e.subset().iter().find_map(|k| self.find_unique(k));
+        }
+        None
+    }
+}
+
+///Represents searching elements in next sibling.
+#[derive(Debug, CopyGetters, Setters)]
+pub struct FindNextSibling<T>
+where
+    T: Requirement,
+{
+    f: T,
+    #[getset(get_copy = "pub", set = "pub")]
+    n: usize,
+}
+
+impl<T> FindNextSibling<T>
+where
+    T: Requirement,
+{
+    ///Creates a new instance. `n` is range, searches all next sibling if it's 0.
+    pub fn new(f: T, n: usize) -> Self {
+        Self { f, n }
+    }
+
+    fn subset_end_index(&self, i: usize, subset_len: usize) -> usize {
+        if self.n == 0 {
+            subset_len
+        } else {
+            subset_len.min(i + self.n + 1)
+        }
+    }
+
+    ///Gets elements that satisfy the requirements by an element to the vec.
+    pub fn find(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
+        let mut p = None;
+        if let Ok(e) = o.read() {
+            p = e.upper().as_ref().cloned();
+        }
+        if let Some(p) = p {
+            if let Ok(e) = p.read() {
+                if let Some(i) = e.subset_element_index(o) {
+                    let n = self.subset_end_index(i, e.subset().len());
+                    e.subset().range(i..n).for_each(|o| {
+                        if let Ok(e) = o.read() {
+                            if self.f.satisfy(&e) {
+                                v.push(o.clone());
+                            }
+                        }
+                    });
                 }
             }
         }
-        v = r;
     }
-    v
-}
 
-fn find_mark(o: Arc<RwLock<Element>>, s: &Mark, v: &mut Vec<Arc<RwLock<Element>>>) {
-    if let Ok(e) = o.read() {
-        if e.mark_type() == s {
-            v.push(o.clone())
+    ///Returns unique element that satisfy the requirements by an element.
+    pub fn find_unique(&mut self, o: &Arc<RwLock<Element>>) -> Option<Arc<RwLock<Element>>> {
+        let mut p = None;
+        if let Ok(e) = o.read() {
+            p = e.upper().as_ref().cloned();
         }
-        e.subset().iter().for_each(|k| find_mark(k.clone(), s, v))
-    }
-}
-
-fn find_class(o: Arc<RwLock<Element>>, s: &str, v: &mut Vec<Arc<RwLock<Element>>>) {
-    if let Ok(e) = o.read() {
-        if let Some(c) = e.attribute().class() {
-            if c == s {
-                v.push(o.clone());
+        if let Some(p) = p {
+            if let Ok(e) = p.read() {
+                if let Some(i) = e.subset_element_index(o) {
+                    let n = self.subset_end_index(i, e.subset().len());
+                    return e.subset().range(i..n).find_map(|o| {
+                        if let Ok(e) = o.read() {
+                            if self.f.satisfy(&e) {
+                                return Some(o.clone());
+                            }
+                        }
+                        None
+                    });
+                }
             }
         }
-        e.subset().iter().for_each(|k| find_class(k.clone(), s, v))
+        None
     }
 }
 
-fn find_id(o: Arc<RwLock<Element>>, s: &str) -> Option<Arc<RwLock<Element>>> {
-    if let Ok(e) = o.read() {
-        if let Some(i) = e.attribute().id() {
-            if i == s {
-                return Some(o.clone());
-            }
+///Represents searching elements in preceding sibling.
+#[derive(Debug, CopyGetters, Setters)]
+pub struct FindPrecedingSibling<T>
+where
+    T: Requirement,
+{
+    f: T,
+    #[getset(get_copy = "pub", set = "pub")]
+    n: usize,
+    i: usize,
+}
+
+impl<T> FindPrecedingSibling<T>
+where
+    T: Requirement,
+{
+    ///Creates a new instance. `n` is range, searches all preceding sibling if it's 0.
+    pub fn new(f: T, n: usize) -> Self {
+        Self { f, n, i: n }
+    }
+
+    fn subset_start_index(&self, i: usize) -> usize {
+        if self.n == 0 {
+            0
+        } else {
+            i.saturating_sub(self.n)
         }
-        for k in e.subset().iter() {
-            let t = find_id(k.clone(), s);
-            if t.is_some() {
-                return t;
+    }
+
+    ///Gets elements that satisfy the requirements by an element to the vec.
+    pub fn find(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
+        let mut p = None;
+        if let Ok(e) = o.read() {
+            p = e.upper().as_ref().cloned();
+        }
+        if let Some(p) = p {
+            if let Ok(e) = p.read() {
+                if let Some(i) = e.subset_element_index(o) {
+                    let n = self.subset_start_index(i);
+                    e.subset().range(n..=i).for_each(|o| {
+                        if let Ok(e) = o.read() {
+                            if self.f.satisfy(&e) {
+                                v.push(o.clone());
+                            }
+                        }
+                    })
+                }
             }
         }
     }
-    None
+
+    ///Returns unique element that satisfy the requirements by an element.
+    pub fn find_unique(&mut self, o: &Arc<RwLock<Element>>) -> Option<Arc<RwLock<Element>>> {
+        let mut p = None;
+        if let Ok(e) = o.read() {
+            p = e.upper().as_ref().cloned();
+        }
+        if let Some(p) = p {
+            if let Ok(e) = p.read() {
+                if let Some(i) = e.subset_element_index(o) {
+                    let n = self.subset_start_index(i);
+                    return e.subset().range(n..=i).find_map(|o| {
+                        if let Ok(e) = o.read() {
+                            if self.f.satisfy(&e) {
+                                return Some(o.clone());
+                            }
+                        }
+                        None
+                    });
+                }
+            }
+        }
+        None
+    }
+}
+
+///Represents whether element's mark equals the mark.
+pub struct MarkEq<'a> {
+    m: &'a Mark,
+}
+
+impl<'a> MarkEq<'a> {
+    ///Creates a new instance.
+    pub fn new(m: &'a Mark) -> Self {
+        Self { m }
+    }
+}
+
+impl<'a> Requirement for MarkEq<'a> {
+    fn satisfy(&self, e: &Element) -> bool {
+        e.mark_type() == self.m
+    }
+}
+
+///Represents whether element's attribute exists.
+pub struct AttrExists<'a> {
+    n: &'a AttrName,
+}
+
+impl<'a> AttrExists<'a> {
+    ///Creates a new instance.
+    pub fn new(n: &'a AttrName) -> Self {
+        Self { n }
+    }
+}
+
+impl<'a> Requirement for AttrExists<'a> {
+    fn satisfy(&self, e: &Element) -> bool {
+        e.attribute().contains_key(self.n)
+    }
+}
+
+///Represents whether element's attribute matches the pattern.
+pub struct AttrMatch<'a> {
+    n: &'a AttrName,
+    p: &'a AttrPattern,
+}
+
+impl<'a> AttrMatch<'a> {
+    ///Creates a new instance.
+    pub fn new(n: &'a AttrName, p: &'a AttrPattern) -> Self {
+        Self { n, p }
+    }
+}
+
+impl<'a> Requirement for AttrMatch<'a> {
+    fn satisfy(&self, e: &Element) -> bool {
+        e.attribute_get(self.n)
+            .map(|a| a.matches(self.p))
+            .unwrap_or(false)
+    }
+}
+
+///Represents match any element.
+pub struct AnyMatch;
+
+impl Requirement for AnyMatch {
+    fn satisfy(&self, _: &Element) -> bool {
+        true
+    }
 }
