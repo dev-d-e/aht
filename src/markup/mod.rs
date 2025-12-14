@@ -438,9 +438,25 @@ impl Attribute {
         }
     }
 
+    ///Converts from a pair of string. Returns Err when it's not attribute.
+    pub fn from_s(a: &str, s: &mut String) -> Result<Self> {
+        Self::from(&AttrName::try_from(a)?, s)
+    }
+
     ///Returns attribute name.
     pub fn name(&self) -> AttrName {
         self.into()
+    }
+
+    ///Returns true if matches a pattern within the given string.
+    pub fn matches(&self, o: &AttrPattern) -> bool {
+        let s = self.to_string();
+        match o {
+            AttrPattern::Eq(o) => &s == o,
+            AttrPattern::Contain(o) => s.contains(o),
+            AttrPattern::StartsWith(o) => s.starts_with(o),
+            AttrPattern::EndsWith(o) => s.ends_with(o),
+        }
     }
 }
 
@@ -485,4 +501,13 @@ impl std::fmt::Display for Attribute {
         };
         f.write_str(s)
     }
+}
+
+///Represents pattern for searching in attribute.
+#[derive(Debug)]
+pub enum AttrPattern {
+    Eq(String),
+    Contain(String),
+    StartsWith(String),
+    EndsWith(String),
 }
