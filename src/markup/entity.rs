@@ -162,6 +162,7 @@ impl Element {
         Err(self)
     }
 
+    ///Returns a reference to attribute.
     pub fn attribute_get(&self, a: &AttrName) -> Option<&Attribute> {
         self.attribute.get(a)
     }
@@ -175,20 +176,24 @@ impl Element {
         self.text()
     }
 
+    ///Inserts an attribute.
     pub fn attribute_insert(&mut self, a: Attribute) {
         self.attribute.insert(a.name(), a);
     }
 
+    ///Inserts an element into subset.
     pub fn subset_insert(&mut self, n: usize, a: Self) {
         if n < self.subset.len() {
             self.subset.insert(n, Arc::new(RwLock::new(a)));
         }
     }
 
+    ///Removes an element from subset.
     pub fn subset_remove(&mut self, n: usize) -> Option<Arc<RwLock<Self>>> {
         self.subset.remove(n)
     }
 
+    ///Removes an element from subset.
     pub fn subset_swap_remove(&mut self, o: Arc<RwLock<Self>>, a: Self) {
         if let Some(i) = self
             .subset
@@ -221,49 +226,11 @@ impl Element {
         });
     }
 
-    ///Find by `Mark`.
-    pub fn find_mark(&mut self, s: Mark) -> Vec<Arc<RwLock<Self>>> {
-        self.find(s)
-    }
-
-    ///Find by class.
-    pub fn find_class(&mut self, s: &str) -> Vec<Arc<RwLock<Self>>> {
-        self.find(Condition::CLASS(s))
-    }
-
-    ///Find by id.
-    pub fn find_id(&mut self, s: &str) -> Option<Arc<RwLock<Self>>> {
-        let mut v = self.find(Condition::ID(s));
-        if v.is_empty() {
-            None
-        } else {
-            Some(v.remove(0))
-        }
-    }
-
-    ///Find `Element` references by `Conditions`.
-    pub fn find<'a>(&mut self, conditions: impl Into<Conditions<'a>>) -> Vec<Arc<RwLock<Self>>> {
-        let v = self.subset.iter().map(|i| i.clone()).collect();
-        find_elements(v, conditions.into())
-    }
-
-    ///Find in subset.
-    pub fn subset_find(
-        &self,
-        self_arc: Arc<RwLock<Self>>,
-        o: Arc<RwLock<Self>>,
-    ) -> Option<Arc<RwLock<Self>>> {
-        self.subset.iter().find_map(|k| {
-            if Arc::as_ptr(&k) == Arc::as_ptr(&o) {
-                Some(self_arc.clone())
-            } else {
-                if let Ok(e) = k.read() {
-                    e.subset_find(k.clone(), o.clone())
-                } else {
-                    None
-                }
-            }
-        })
+    ///Returns index of an element in subset.
+    pub fn subset_element_index(&self, o: &Arc<RwLock<Self>>) -> Option<usize> {
+        self.subset
+            .iter()
+            .position(|k| Arc::as_ptr(k) == Arc::as_ptr(o))
     }
 }
 
