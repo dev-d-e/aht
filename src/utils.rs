@@ -34,6 +34,16 @@ pub(crate) mod ascii {
     pub(crate) const AMPERSAND: char = '&';
     //';'
     pub(crate) const SEMICOLON: char = ';';
+    //'@'
+    pub(crate) const AT: char = '@';
+    //'.'
+    pub(crate) const FULL_STOP: char = '.';
+    //':'
+    pub(crate) const COLON: char = ':';
+    //'{'
+    pub(crate) const LEFT_CURLY_BRACKET: char = '{';
+    //'}'
+    pub(crate) const RIGHT_CURLY_BRACKET: char = '}';
 }
 
 #[inline(always)]
