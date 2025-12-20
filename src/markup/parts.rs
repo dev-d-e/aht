@@ -435,7 +435,12 @@ impl FromStr for Points {
                 break;
             }
         }
-        to_usize(count_str).map(|count| Self { data, count })
+
+        if count_str.is_empty() {
+            Ok(Self { data, count: 0 })
+        } else {
+            to_usize(count_str).map(|count| Self { data, count })
+        }
     }
 }
 
@@ -477,7 +482,7 @@ impl FromStr for ScriptType {
     fn from_str(s: &str) -> Result<Self> {
         match s {
             JS => Ok(Self::JS),
-            _ => Err(ErrorKind::None.into()),
+            _ => Err((ErrorKind::Script, "unsupported").into()),
         }
     }
 }
