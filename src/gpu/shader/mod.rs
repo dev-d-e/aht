@@ -19,11 +19,11 @@ impl ComputeQueueHolder {
         let instance = Instance::new(&InstanceDescriptor::default());
 
         let adapter = block_on(instance.request_adapter(&RequestAdapterOptions::default()))
-            .map_err(|e| to_err(e))?;
+            .map_err(|e| to_err(ErrorKind::Gpu, e))?;
 
         let o = adapter.get_downlevel_capabilities();
         if !o.flags.contains(DownlevelFlags::COMPUTE_SHADERS) {
-            return Err(ErrorKind::GpuError.into());
+            return Err((ErrorKind::Gpu, "compute_shaders unsupported").into());
         }
 
         let device_descriptor = DeviceDescriptor {
@@ -35,7 +35,7 @@ impl ComputeQueueHolder {
             ..Default::default()
         };
         block_on(adapter.request_device(&device_descriptor))
-            .map_err(|e| to_err(e))
+            .map_err(|e| to_err(ErrorKind::Gpu, e))
             .map(|(device, queue)| Self { device, queue })
     }
 }
