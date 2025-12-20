@@ -20,11 +20,6 @@ use std::collections::HashMap;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::thread::JoinHandle;
 
-#[inline(always)]
-fn to_err(e: impl std::error::Error + 'static) -> Error {
-    (ErrorKind::MediaError, e).into()
-}
-
 const BOUND_SIZE: usize = 8;
 const CTRL_SIZE: usize = 1;
 const IMAGE_DATA_FPS: f32 = 24.0;
@@ -389,10 +384,12 @@ struct MediaWrapper {
 
 impl MediaWrapper {
     fn new(p: &str) -> Result<Self> {
-        input(p).map_err(|e| to_err(e)).map(|input| Self {
-            input,
-            map: HashMap::new(),
-        })
+        input(p)
+            .map_err(|e| to_err(ErrorKind::Media, e))
+            .map(|input| Self {
+                input,
+                map: HashMap::new(),
+            })
     }
 
     fn decode(&mut self, sender: ImageDataSender) {
