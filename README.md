@@ -6,28 +6,69 @@ The components build on plane rectangular coordinates.
 
 ## Usage
 
-```
-use aht::markup::{Element, Page};
-
-Element::from_str(&s);
-Page::from_str(&s);
-```
+Use `Element` or `Page` to parse.
 
 ```
 <aht>
     <head>
         <title></title>
     </head>
-    <body column="[100,100]" row="[100,100],2">
+    <body>
         <inp name="" value="" readonly required>input</inp>
-        <button href="">button</button>
-        <area class="" id="" width="1000" height="100" column="2" row=""></area>
+        <button href="" class=a>button</button>
+        <area id="b"></area>
     </body>
     <style>
+    body {
+        column:[100,100];
+        row:[100,100],2;
+    }
+    inp {
+        ordinal:0;
+        height:100;
+    }
+    .a {
+        position=100,100;
+    }
+    .id = b {
+        width:1000;
+        height:100;
+        column:2;
+        row:1;
+    }
     </style>
     <script>
     </script>
  </aht>
+```
+or use single mark format
+```
+<aht>
+    < head>
+        < title>
+    <:body>
+        < inp name="" value="" readonly required>input
+        <button href="" class=a>button
+        <area class="" id="b">
+    <:style>
+    body {
+        column:[100,100];
+        row:[100,100],2;
+    }
+    inp {
+        ordinal:0;
+        height:100;
+    }
+    .a {
+        position=100,100;
+    }
+    .id = b {
+        width:1000;
+        height:100;
+        column:2;
+        row:1;
+    }
+    <script>
 ```
  
 * "head" element is a collection of metadata for the document.There is only one "head" element in conforming documents.
@@ -55,3 +96,7 @@ set "column" attribute and "row" attribute with number or points or segments, ch
 * "button" element represents a button.
 
 * "video" element represents video.
+
+* "style" element represents style sheet, which supports mark searching and attribute searching.
+
+* "script" element represents script.
