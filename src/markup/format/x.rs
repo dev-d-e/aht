@@ -18,7 +18,7 @@ pub(super) struct Context<'a> {
     current_function: fn(&mut Context),
     next_function: fn(&mut Context),
     c: char,
-    n: usize,
+    counter: CharCounter,
     temporary: String,
     temporary_attr: (String, String),
     temporary_escape: String,
@@ -31,7 +31,7 @@ impl<'a> Context<'a> {
             current_function: tag_0,
             next_function: tag_0,
             c: 0 as char,
-            n: 0,
+            counter: Default::default(),
             temporary: String::new(),
             temporary_attr: (String::new(), String::new()),
             temporary_escape: String::new(),
@@ -74,6 +74,11 @@ impl<'a> Context<'a> {
             }
         }
     }
+
+    fn output_error(&mut self, s: &str) {
+        let e = self.counter.to_error(ErrorKind::Markup, s);
+        self.parser.error(e);
+    }
 }
 
 pub(super) fn accept(context: &mut Context, buf: &str) {
@@ -81,7 +86,7 @@ pub(super) fn accept(context: &mut Context, buf: &str) {
     while let Some(c) = cs.next() {
         context.c = c;
         (context.current_function)(context);
-        context.n += 1;
+        context.counter.count(c);
     }
 }
 
@@ -190,8 +195,7 @@ fn tag_4(context: &mut Context) {
     if c == GT {
         context.current_function = tag_0;
     } else {
-        let e = (ErrorKind::BrokenEnd, context.n, context.n).into();
-        context.parser.error(e);
+        context.output_error("illegal char");
     }
 }
 
