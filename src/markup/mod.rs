@@ -111,7 +111,7 @@ impl FromStr for Mark {
             TIME => Ok(Self::TIME),
             TITLE => Ok(Self::TITLE),
             VIDEO => Ok(Self::VIDEO),
-            _ => Err(ErrorKind::InvalidMark.into()),
+            _ => Err((ErrorKind::Markup, format!("invalid mark: {s}")).into()),
         }
     }
 }
@@ -292,7 +292,7 @@ impl FromStr for AttrName {
             ONLOAD => Ok(Self::ONLOAD),
             ONRESIZE => Ok(Self::ONRESIZE),
             ONSCROLL => Ok(Self::ONSCROLL),
-            _ => Err(ErrorKind::InvalidAttribute.into()),
+            _ => Err((ErrorKind::Markup, format!("invalid attribute: {s}")).into()),
         }
     }
 }
