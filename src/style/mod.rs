@@ -22,7 +22,7 @@ impl StyleContext {
     }
 
     pub(crate) fn build(&mut self, s: &str, context: &mut PageContext) {
-        let (r, _) = Parser::new().parse_str(s);
+        let (r, _) = StyleSheetBuilder::build(s);
         self.style_sheet = r;
 
         self.set_style(vec![context.body_element().clone()]);
