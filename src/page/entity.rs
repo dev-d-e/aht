@@ -66,16 +66,26 @@ impl Page {
     }
 
     ///Parse a string slice.
-    pub fn parse(buf: &str) -> (Option<Self>, ErrorHolder) {
-        let (e, mut err) = Element::parse_one(buf);
+    fn parse0(buf: &str, o: MarkNumber) -> (Option<Self>, ErrorHolder) {
+        let (e, mut err) = Element::parse_one(buf, o);
         let p = e
             .map(|e| {
                 e.to_page()
-                    .map_err(|_| err.push(ErrorKind::InvalidMark.into()))
+                    .map_err(|_| err.push((ErrorKind::Markup, "no page").into()))
                     .ok()
             })
             .flatten();
         (p, err)
+    }
+
+    ///Parse a string slice.
+    pub fn parse(buf: &str) -> (Option<Self>, ErrorHolder) {
+        Self::parse0(buf, MarkNumber::Double)
+    }
+
+    ///Parse a string slice.
+    pub fn parse_s(buf: &str) -> (Option<Self>, ErrorHolder) {
+        Self::parse0(buf, MarkNumber::Single)
     }
 
     ///Reset width and height, each number is not equal to the size of window if the coordinate is not 0.0
