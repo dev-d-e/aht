@@ -104,8 +104,11 @@ impl Element {
     }
 
     ///Parse a string slice to many.
-    pub fn parse_many(buf: &str) -> (VecDeque<Self>, ErrorHolder) {
-        let (v, mut error) = accept(buf);
+    pub fn parse_many(buf: &str, o: MarkNumber) -> (VecDeque<Self>, ErrorHolder) {
+        let (v, mut error) = match o {
+            MarkNumber::Double => accept(buf),
+            MarkNumber::Single => accept_s(buf),
+        };
         let v = v
             .into_iter()
             .filter_map(|o| {
@@ -122,9 +125,19 @@ impl Element {
     }
 
     ///Parse a string slice to it.
-    pub fn parse_one(buf: &str) -> (Option<Self>, ErrorHolder) {
-        let (mut v, error) = Self::parse_many(buf);
+    pub fn parse_one(buf: &str, o: MarkNumber) -> (Option<Self>, ErrorHolder) {
+        let (mut v, error) = Self::parse_many(buf, o);
         (v.pop_front(), error)
+    }
+
+    ///Parse a string slice to it.
+    pub fn parse_d_one(buf: &str) -> (Option<Self>, ErrorHolder) {
+        Self::parse_one(buf, MarkNumber::Double)
+    }
+
+    ///Parse a string slice to it.
+    pub fn parse_s_one(buf: &str) -> (Option<Self>, ErrorHolder) {
+        Self::parse_one(buf, MarkNumber::Single)
     }
 
     ///Returns a string slice of this element's type.
@@ -304,6 +317,13 @@ impl CheckElement {
     }
 }
 
+///Represents mark number.
+#[derive(Debug)]
+pub enum MarkNumber {
+    Double,
+    Single,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,7 +344,7 @@ mod tests {
         <script>
         </script>
      </aht>";
-        let (e, err) = Element::parse_one(&s);
+        let (e, err) = Element::parse_d_one(&s);
         for o in err.iter() {
             println!("{:?}", o);
         }
