@@ -1,6 +1,7 @@
 use super::*;
 use getset::{Getters, MutGetters};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::str::FromStr;
 
 #[derive(Debug, Default, Getters, MutGetters)]
 pub(super) struct StyleSheet {
@@ -20,7 +21,26 @@ impl StyleSheet {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct AtRules {}
+pub(super) struct AtRules(Vec<AtRule>);
+
+deref!(AtRules, Vec<AtRule>, 0);
+
+#[derive(Debug, Default, Getters, MutGetters)]
+pub(super) struct AtRule {
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    key: String,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    attribute: HashMap<AttrName, Attribute>,
+}
+
+impl AtRule {
+    fn new(key: String) -> Self {
+        Self {
+            key,
+            attribute: Default::default(),
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub(super) struct StyleRules(Vec<StyleRule>);
@@ -159,5 +179,113 @@ impl SelectorHolder {
             o = c;
         }
         v
+    }
+}
+
+#[derive(Debug)]
+enum RuleKind {
+    AtRule,
+    StyleRule,
+}
+
+impl Default for RuleKind {
+    fn default() -> Self {
+        Self::StyleRule
+    }
+}
+
+impl RuleKind {}
+
+#[derive(Debug, Default, Getters, MutGetters)]
+pub(super) struct StyleSheetBuilder {
+    o: StyleRule,
+    a: AtRule,
+    k: RuleKind,
+    rst: StyleSheet,
+    error: ErrorHolder,
+}
+
+impl StyleSheetBuilder {
+    pub(super) fn take(self) -> (StyleSheet, ErrorHolder) {
+        (self.rst, self.error)
+    }
+
+    pub(super) fn build(s: &str) -> (StyleSheet, ErrorHolder) {
+        Parser::new(Self::default()).parse_str(s).take()
+    }
+}
+
+impl Output for StyleSheetBuilder {
+    fn at(&mut self, s: String) {
+        self.a.key_mut().push_str(&s);
+        self.k = RuleKind::AtRule;
+    }
+
+    fn mark_selector(&mut self, s: String) {
+        if let Ok(m) = Mark::try_from(&s) {
+            let k = (Selector::Mark(m), Combiner::Descendant(0));
+            self.o.key_mut().push(k);
+        }
+    }
+
+    fn attribute_selector(&mut self, k: String, v: String) {
+        if k.is_empty() {
+            let k = (
+                Selector::Attribute(AttrName::CLASS, AttrPattern::Contain(v)),
+                Combiner::Descendant(0),
+            );
+            self.o.key_mut().push(k);
+        } else {
+            match AttrName::from_str(&k) {
+                Ok(a) => {
+                    let k = (
+                        Selector::Attribute(a, AttrPattern::Contain(v)),
+                        Combiner::Descendant(0),
+                    );
+                    self.o.key_mut().push(k);
+                }
+                Err(e) => {
+                    error!("{e}");
+                }
+            }
+        }
+    }
+
+    fn start_block(&mut self) {
+        todo!()
+    }
+
+    fn attribute(&mut self, k: String, mut v: String) {
+        match Attribute::from_s(&k, &mut v) {
+            Ok(a) => match self.k {
+                RuleKind::AtRule => {
+                    self.a.attribute_mut().insert(a.name(), a);
+                }
+                RuleKind::StyleRule => {
+                    self.o.attribute_mut().insert(a.name(), a);
+                }
+            },
+            Err(e) => {
+                error!("{e}");
+            }
+        }
+    }
+
+    fn end_block(&mut self) {
+        match self.k {
+            RuleKind::AtRule => {
+                let a = std::mem::take(&mut self.a);
+                self.rst.at_rules_mut().push(a);
+            }
+            RuleKind::StyleRule => {
+                let o = std::mem::take(&mut self.o);
+                self.rst.style_rules_mut().push(o);
+            }
+        }
+        self.k = RuleKind::StyleRule;
+    }
+
+    fn error(&mut self, e: Error) {
+        self.error.push(e)
     }
 }
