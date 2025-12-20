@@ -1,3 +1,4 @@
+mod s;
 mod x;
 
 use self::x::*;
@@ -72,6 +73,7 @@ struct Builder {
     last_one: Option<*mut UnclearElement>,
     last_step: usize,
     error: ErrorHolder,
+    f: bool,
 }
 
 impl Default for Builder {
@@ -82,6 +84,7 @@ impl Default for Builder {
             last_one: None,
             last_step: 0,
             error: Default::default(),
+            f: false,
         }
     }
 }
@@ -173,8 +176,58 @@ impl XParser for Builder {
     }
 }
 
+impl s::Output for Builder {
+    fn child(&mut self) {
+        self.f = true;
+    }
+
+    fn root(&mut self, n: usize) {
+        self.temporary.truncate(n);
+        self.f = true;
+    }
+
+    fn upper(&mut self, n: usize) {
+        let i = self.temporary.len();
+        if n < i {
+            self.temporary.truncate(i - n);
+        }
+        self.f = false;
+    }
+
+    fn tag(&mut self, s: String) {
+        if self.f {
+            self.f = false;
+        } else {
+            self.temporary.pop();
+        }
+
+        self.start_tag(s);
+    }
+
+    fn attribute(&mut self, k: String, v: String) {
+        if let Some(p) = self.last_one {
+            unsafe {
+                (*p).add_attribute(k, Some(v));
+            }
+        }
+    }
+
+    fn text(&mut self, s: String) {
+        self.tag_text(s);
+    }
+
+    fn error(&mut self, e: Error) {
+        self.error.push(e)
+    }
+}
+
 pub(super) fn accept(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
     Builder::build(buf)
+}
+
+pub(super) fn accept_s(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
+    let o = s::Parser::new(Builder::default()).parse_str(buf);
+    (o.rst.subset, o.error)
 }
 
 #[cfg(test)]
