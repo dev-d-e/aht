@@ -22,8 +22,10 @@ impl Default for ScreenBuilder {
 impl ScreenBuilder {
     ///Run the application.
     pub fn run(&mut self, mut o: WindowContext) -> Result<()> {
-        let event_loop: Result<_> = EventLoop::new().map_err(|e| to_err(e));
-        event_loop?.run_app(&mut o).map_err(|e| to_err(e))
+        let event_loop: Result<_> = EventLoop::new().map_err(|e| to_err(ErrorKind::Window, e));
+        event_loop?
+            .run_app(&mut o)
+            .map_err(|e| to_err(ErrorKind::Window, e))
     }
 
     ///Run the application.
