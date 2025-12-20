@@ -43,7 +43,7 @@ pub struct InstanceHolder {
 impl InstanceHolder {
     ///Creates a new instance, get available physical devices.
     pub fn new() -> Result<Self> {
-        let library = VulkanLibrary::new().map_err(|e| to_err(e))?;
+        let library = VulkanLibrary::new().map_err(|e| to_err(ErrorKind::Gpu, e))?;
         let c = InstanceCreateInfo {
             enabled_extensions: InstanceExtensions {
                 khr_surface: true,
@@ -57,10 +57,10 @@ impl InstanceHolder {
             },
             ..Default::default()
         };
-        let instance = Instance::new(library, c).map_err(|e| to_err(e))?;
+        let instance = Instance::new(library, c).map_err(|e| to_err(ErrorKind::Gpu, e))?;
         instance
             .enumerate_physical_devices()
-            .map_err(|e| to_err(e))
+            .map_err(|e| to_err(ErrorKind::Gpu, e))
             .map(|d| Self {
                 instance,
                 physical_devices: d.collect(),
@@ -87,7 +87,7 @@ impl InstanceHolder {
                         .is_some()
             })
             .min_by_key(device_type)
-            .ok_or_else(|| ErrorKind::NotFound.into())
+            .ok_or_else(|| (ErrorKind::Gpu, "graphics queue was not found").into())
             .cloned()
     }
 
@@ -107,7 +107,7 @@ impl InstanceHolder {
                         .is_some()
             })
             .min_by_key(device_type)
-            .ok_or_else(|| ErrorKind::NotFound.into())
+            .ok_or_else(|| (ErrorKind::Gpu, "graphics queue was not found").into())
             .cloned()
     }
 }
@@ -153,7 +153,7 @@ impl DeviceQueueHolder {
     pub fn new(physical_device: Arc<PhysicalDevice>) -> Result<Self> {
         let qf = queue_family_flags(&physical_device);
         if qf.is_empty() {
-            return Err(ErrorKind::NotFound.into());
+            return Err((ErrorKind::Gpu, "queue family was not found").into());
         }
 
         let queue_create_infos = qf
@@ -171,7 +171,8 @@ impl DeviceQueueHolder {
             },
             ..Default::default()
         };
-        let (device, queue) = Device::new(physical_device, d).map_err(|e| to_err(e))?;
+        let (device, queue) =
+            Device::new(physical_device, d).map_err(|e| to_err(ErrorKind::Gpu, e))?;
 
         let (queue_graphics, mut queue_compute): (Vec<Arc<Queue>>, Vec<Arc<Queue>>) = queue
             .partition(|q| {
@@ -180,7 +181,7 @@ impl DeviceQueueHolder {
                     .unwrap_or(false)
             });
         if queue_graphics.is_empty() {
-            return Err(ErrorKind::NotFound.into());
+            return Err((ErrorKind::Gpu, "graphics queue was not found").into());
         } else if queue_compute.is_empty() {
             queue_compute.push(queue_graphics.last().unwrap().clone());
         }
@@ -214,7 +215,8 @@ impl SurfaceQueueHolder {
         w: Arc<impl HasWindowHandle + HasDisplayHandle + Any + Send + Sync>,
     ) -> Result<Self> {
         let i = &INSTANCE;
-        let surface = Surface::from_window(i.instance().clone(), w).map_err(|e| to_err(e))?;
+        let surface =
+            Surface::from_window(i.instance().clone(), w).map_err(|e| to_err(ErrorKind::Gpu, e))?;
         let p = i.physical_device(surface.clone())?;
         DeviceQueueHolder::new(p).map(|queue| Self { queue, surface })
     }
@@ -225,11 +227,11 @@ fn swapchain(device: Arc<Device>, surface: Arc<Surface>) -> Result<Arc<Swapchain
     let physical_device = device.physical_device();
     let surface_capabilities = physical_device
         .surface_capabilities(&surface, Default::default())
-        .map_err(|e| to_err(e))?;
+        .map_err(|e| to_err(ErrorKind::Gpu, e))?;
 
     let (image_format, image_color_space) = physical_device
         .surface_formats(&surface, Default::default())
-        .map_err(|e| to_err(e))?[0];
+        .map_err(|e| to_err(ErrorKind::Gpu, e))?[0];
     Swapchain::new(
         device,
         surface,
@@ -244,7 +246,7 @@ fn swapchain(device: Arc<Device>, surface: Arc<Surface>) -> Result<Arc<Swapchain
             ..Default::default()
         },
     )
-    .map_err(|e| to_err(e))
+    .map_err(|e| to_err(ErrorKind::Gpu, e))
     .map(|(swapchain, _images)| swapchain)
 }
 
@@ -298,10 +300,10 @@ impl VkRenderer {
                 depth_stencil: {},
             },
         )
-        .map_err(|e| to_err(e))?;
+        .map_err(|e| to_err(ErrorKind::Gpu, e))?;
 
         build_direct_context(device.clone(), holder.queue_graphics[0].clone())
-            .ok_or_else(|| ErrorKind::NotFound.into())
+            .ok_or_else(|| (ErrorKind::Gpu, "directcontext was not found").into())
             .map(|skia_context| Self {
                 holder,
                 swapchain,
