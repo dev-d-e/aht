@@ -12,11 +12,6 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::any::Any;
 use std::sync::Arc;
 
-#[inline(always)]
-fn to_err(e: impl std::error::Error + 'static) -> Error {
-    (ErrorKind::GpuError, e).into()
-}
-
 ///Represents renderer.
 #[derive(Getters, MutGetters)]
 pub struct Renderer {
@@ -34,7 +29,7 @@ impl Renderer {
                 .map(|r| Self { r })
         } else {
             warn!("There is no renderer");
-            Err(ErrorKind::None.into())
+            Err((ErrorKind::Gpu, "no renderer").into())
         }
     }
 
