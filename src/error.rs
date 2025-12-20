@@ -12,56 +12,57 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    BrokenEnd,
-    UnexpectedChar,
-    InvalidMark,
-    InvalidAttribute,
-    Interrupted,
-    AttributeParse,
-    ParseBool,
-    ParseInt,
-    ParseFloat,
-    None,
-    NotFound,
-    MediaError,
-    GpuError,
+    Markup,
+    Style,
+    Script,
+    StrErr,
+    Media,
+    Gpu,
+    Window,
 }
 
 ///Represents error.
-#[derive(Debug, Getters)]
+#[derive(Getters)]
 pub struct Error {
     #[getset(get = "pub")]
     kind: ErrorKind,
     p: Option<(usize, usize)>,
-    e: Option<Box<dyn std::error::Error>>,
+    s: String,
 }
 
 impl Error {
-    fn format(kind: ErrorKind, a: usize, b: usize) -> Self {
+    fn format(kind: ErrorKind, a: usize, b: usize, s: impl ToString) -> Self {
         Self {
             kind,
             p: Some((a, b)),
-            e: None,
+            s: s.to_string(),
         }
     }
 
-    fn kind_err(kind: ErrorKind, e: impl std::error::Error + 'static) -> Self {
+    fn new(kind: ErrorKind, s: impl ToString) -> Self {
         Self {
             kind,
             p: None,
-            e: Some(Box::new(e)),
+            s: s.to_string(),
         }
+    }
+}
+
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = format!("{:?}", self.kind);
+        let mut s = format!("{:?} Error.", self.kind);
         if let Some(p) = self.p {
-            s.push_str(&format!("{p:?}"));
+            s.push_str(&format!(" {p:?}"));
         }
-        if let Some(e) = &self.e {
-            s.push_str(&format!("{e}"));
+        if self.s.len() > 0 {
+            s.push(' ');
+            s.push_str(&self.s);
         }
         f.write_str(&s)
     }
@@ -69,47 +70,27 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<ErrorKind> for Error {
-    fn from(kind: ErrorKind) -> Self {
-        Self {
-            kind,
-            p: None,
-            e: None,
-        }
-    }
-}
-
-impl From<(ErrorKind, usize, usize)> for Error {
-    fn from(o: (ErrorKind, usize, usize)) -> Self {
-        Self::format(o.0, o.1, o.2)
+impl<T> From<(ErrorKind, usize, usize, T)> for Error
+where
+    T: ToString,
+{
+    fn from(o: (ErrorKind, usize, usize, T)) -> Self {
+        Self::format(o.0, o.1, o.2, o.3)
     }
 }
 
 impl<T> From<(ErrorKind, T)> for Error
 where
-    T: std::error::Error + 'static,
+    T: ToString,
 {
     fn from(o: (ErrorKind, T)) -> Self {
-        Self::kind_err(o.0, o.1)
+        Self::new(o.0, o.1)
     }
 }
 
-impl From<ParseBoolError> for Error {
-    fn from(e: ParseBoolError) -> Self {
-        Self::kind_err(ErrorKind::ParseBool, e)
-    }
-}
-
-impl From<ParseIntError> for Error {
-    fn from(e: ParseIntError) -> Self {
-        Self::kind_err(ErrorKind::ParseInt, e)
-    }
-}
-
-impl From<ParseFloatError> for Error {
-    fn from(e: ParseFloatError) -> Self {
-        Self::kind_err(ErrorKind::ParseFloat, e)
-    }
+#[inline(always)]
+pub(crate) fn to_err(kind: ErrorKind, e: impl std::error::Error) -> Error {
+    (kind, e).into()
 }
 
 ///Collection of `Error`.
