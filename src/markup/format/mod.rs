@@ -205,9 +205,10 @@ impl s::Output for Builder {
     }
 
     fn attribute(&mut self, k: String, v: String) {
+        let v = if v.is_empty() { None } else { Some(v) };
         if let Some(p) = self.last_one {
             unsafe {
-                (*p).add_attribute(k, Some(v));
+                (*p).add_attribute(k, v);
             }
         }
     }
@@ -237,11 +238,13 @@ mod tests {
     const A: &str = "<a b=0 c d= '1' e='0&amp;0&lt;0&gt;0&quot;0&nbsp;0&apos;' f=\"2\">a</a>";
     const B: &str = "<a b=0 c d= '1' e= f=\"2\">a</a>";
     const C: &str = "<a b=0 c d= '1' e=' f=\"2\"/>";
+    const D: &str = "<a b=0 c d= '1' e='' f=\"2\">a&amp;0&lt;0&gt;0&quot;0&nbsp;0&apos;  0";
 
     #[test]
     fn build() {
         println!("{:?}", Builder::build(A));
         println!("{:?}", Builder::build(B));
         println!("{:?}", Builder::build(C));
+        println!("{:?}", accept_s(D));
     }
 }
