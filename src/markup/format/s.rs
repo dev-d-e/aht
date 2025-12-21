@@ -24,8 +24,7 @@ where
     next_function: fn(&mut Self),
     c: char,
     counter: CharCounter,
-    temporary: String,
-    temporary_attr: (String, String),
+    temporary: (String, String),
     temporary_escape: String,
     output: T,
 }
@@ -38,10 +37,9 @@ where
         Self {
             current_function: Self::ignore,
             next_function: Self::tag_0,
-            c: 0 as char,
+            c: NULL,
             counter: Default::default(),
-            temporary: String::new(),
-            temporary_attr: (String::new(), String::new()),
+            temporary: (String::new(), String::new()),
             temporary_escape: String::new(),
             output,
         }
@@ -53,7 +51,8 @@ where
             (self.current_function)(&mut self);
             self.counter.count(c);
         }
-        self.output_text();
+        self.c = NULL;
+        (self.current_function)(&mut self);
         self.output
     }
 
@@ -66,10 +65,10 @@ where
     }
 
     fn output_colon(&mut self) {
-        if self.temporary.is_empty() {
+        if self.temporary.0.is_empty() {
             self.output.root(1);
         } else {
-            match to_usize(self.temporary.drain(..).as_str()) {
+            match to_usize(self.temporary.0.drain(..).as_str()) {
                 Ok(n) => {
                     self.output.root(n);
                 }
@@ -81,10 +80,10 @@ where
     }
 
     fn output_circumflex_accent(&mut self) {
-        if self.temporary.is_empty() {
+        if self.temporary.0.is_empty() {
             self.output.upper(1);
         } else {
-            match to_usize(self.temporary.drain(..).as_str()) {
+            match to_usize(self.temporary.0.drain(..).as_str()) {
                 Ok(n) => {
                     self.output.upper(n);
                 }
@@ -96,22 +95,22 @@ where
     }
 
     fn output_tag(&mut self) {
-        if !self.temporary.is_empty() {
-            let s = self.temporary.drain(..).as_str().to_string();
+        if !self.temporary.0.is_empty() {
+            let s = self.temporary.0.drain(..).as_str().to_string();
             self.output.tag(s);
         }
     }
 
     fn output_text(&mut self) {
-        let s = self.temporary.drain(..).as_str().trim().to_string();
+        let s = self.temporary.0.drain(..).as_str().to_string();
         if !s.is_empty() {
             self.output.text(s);
         }
     }
 
     fn output_attribute(&mut self) {
-        let k = self.temporary_attr.0.drain(..).as_str().to_lowercase();
-        let v = self.temporary_attr.1.drain(..).as_str().to_string();
+        let k = self.temporary.0.drain(..).as_str().to_lowercase();
+        let v = self.temporary.1.drain(..).as_str().to_string();
         if !k.is_empty() {
             self.output.attribute(k, v);
         }
@@ -133,11 +132,12 @@ where
     }
 
     fn series_space(&mut self) {
-        let c = self.c;
-        if c == SPACE {
-        } else {
-            self.current_function = self.next_function;
-            (self.next_function)(self);
+        match self.c {
+            SPACE => {}
+            _ => {
+                self.current_function = self.next_function;
+                (self.next_function)(self);
+            }
         }
     }
 
@@ -147,22 +147,22 @@ where
         if c == SEMICOLON {
             match self.temporary_escape.drain(..).as_str() {
                 "&amp;" => {
-                    self.temporary_attr.1.push(AMPERSAND);
+                    self.temporary.1.push(AMPERSAND);
                 }
                 "&apos;" => {
-                    self.temporary_attr.1.push(APOSTROPHE);
+                    self.temporary.1.push(APOSTROPHE);
                 }
                 "&gt;" => {
-                    self.temporary_attr.1.push(GT);
+                    self.temporary.1.push(GT);
                 }
                 "&lt;" => {
-                    self.temporary_attr.1.push(LT);
+                    self.temporary.1.push(LT);
                 }
                 "&nbsp;" => {
-                    self.temporary_attr.1.push(SPACE);
+                    self.temporary.1.push(SPACE);
                 }
                 "&quot;" => {
-                    self.temporary_attr.1.push(QUOTATION);
+                    self.temporary.1.push(QUOTATION);
                 }
                 _ => {}
             }
@@ -222,11 +222,12 @@ where
         let c = self.c;
         match c {
             'A'..='Z' | 'a'..='z' => {
-                self.temporary.push(c);
+                self.temporary.0.push(c);
             }
             GT => {
                 self.output_tag();
-                self.current_function = Self::text_0;
+                self.current_function = Self::ignore;
+                self.next_function = Self::text_0;
             }
             SPACE | LF | CR => {
                 self.output_tag();
@@ -254,7 +255,7 @@ where
         let c = self.c;
         match c {
             '0'..='9' => {
-                self.temporary.push(c);
+                self.temporary.0.push(c);
             }
             SPACE | LF | CR => {
                 self.output_circumflex_accent();
@@ -287,7 +288,7 @@ where
         let c = self.c;
         match c {
             '0'..='9' => {
-                self.temporary.push(c);
+                self.temporary.0.push(c);
             }
             SPACE | LF | CR => {
                 self.output_colon();
@@ -316,7 +317,8 @@ where
         let c = self.c;
         match c {
             GT => {
-                self.current_function = Self::text_0;
+                self.current_function = Self::ignore;
+                self.next_function = Self::text_0;
             }
             EQUAL => {
                 self.output_error("no attribute name");
@@ -333,7 +335,8 @@ where
         let c = self.c;
         match c {
             GT => {
-                self.current_function = Self::text_0;
+                self.current_function = Self::ignore;
+                self.next_function = Self::text_0;
             }
             SPACE => {
                 self.current_function = Self::ignore;
@@ -359,7 +362,7 @@ where
                 self.attribute_3();
             }
             _ => {
-                self.temporary_attr.0.push(c);
+                self.temporary.0.push(c);
             }
         }
     }
@@ -409,7 +412,8 @@ where
             }
             GT => {
                 self.output_attribute();
-                self.current_function = Self::text_0;
+                self.current_function = Self::ignore;
+                self.next_function = Self::text_0;
             }
             AMPERSAND => {
                 self.current_function = Self::escaping;
@@ -417,7 +421,7 @@ where
                 self.escaping();
             }
             _ => {
-                self.temporary_attr.1.push(c);
+                self.temporary.1.push(c);
             }
         }
     }
@@ -436,13 +440,12 @@ where
                 self.escaping();
             }
             _ => {
-                self.temporary_attr.1.push(c);
+                self.temporary.1.push(c);
             }
         }
     }
 
     fn attribute_5(&mut self) {
-        let c = self.c;
         let c = self.c;
         match c {
             APOSTROPHE => {
@@ -456,7 +459,7 @@ where
                 self.escaping();
             }
             _ => {
-                self.temporary_attr.1.push(c);
+                self.temporary.1.push(c);
             }
         }
     }
@@ -474,13 +477,20 @@ where
                 self.current_function = Self::text_0_1;
                 self.output_error("illegal char");
             }
+            SPACE | LF | CR => {
+                self.current_function = Self::text_1;
+                self.text_1();
+            }
             AMPERSAND => {
                 self.current_function = Self::escaping;
-                self.next_function = Self::attribute_5;
+                self.next_function = Self::text_2;
                 self.escaping();
             }
+            NULL => {
+                self.output_text();
+            }
             _ => {
-                self.temporary.push(c);
+                self.temporary.0.push(c);
             }
         }
     }
@@ -493,5 +503,34 @@ where
             }
             _ => {}
         }
+    }
+
+    fn text_1(&mut self) {
+        let c = self.c;
+        match c {
+            SPACE | LF | CR => {
+                self.temporary.1.push(c);
+            }
+            LT | GT => {
+                self.temporary.1.clear();
+                self.current_function = Self::text_0;
+                self.text_0();
+            }
+            NULL => {
+                self.temporary.1.clear();
+                self.text_0();
+            }
+            _ => {
+                self.text_2();
+            }
+        }
+    }
+
+    fn text_2(&mut self) {
+        self.temporary
+            .0
+            .push_str(self.temporary.1.drain(..).as_str());
+        self.current_function = Self::text_0;
+        self.text_0();
     }
 }
