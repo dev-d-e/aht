@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 pub(crate) mod ascii {
+    pub(crate) const NULL: char = '\0';
     ///' '
     pub(crate) const SPACE: char = ' ';
     ///!
