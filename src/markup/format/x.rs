@@ -30,7 +30,7 @@ impl<'a> Context<'a> {
         Self {
             current_function: tag_0,
             next_function: tag_0,
-            c: 0 as char,
+            c: NULL,
             counter: Default::default(),
             temporary: String::new(),
             temporary_attr: (String::new(), String::new()),
