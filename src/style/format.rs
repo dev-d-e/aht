@@ -37,7 +37,7 @@ where
         Self {
             current_function: Self::ignore,
             next_function: Self::start,
-            c: 0 as char,
+            c: NULL,
             counter: Default::default(),
             temporary: (String::new(), String::new()),
             output,
