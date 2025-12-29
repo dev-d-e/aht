@@ -3,8 +3,6 @@ A module for error.
 */
 
 use getset::{Getters, MutGetters};
-use std::num::{ParseFloatError, ParseIntError};
-use std::str::ParseBoolError;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
