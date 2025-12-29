@@ -6,11 +6,6 @@ use super::*;
 use crate::utils::ascii::*;
 use std::collections::{HashMap, VecDeque};
 
-#[inline]
-fn is_crlf(c: char) -> bool {
-    c == CR || c == LF
-}
-
 #[derive(Debug)]
 pub(super) struct UnclearElement {
     pub(super) key: String,
