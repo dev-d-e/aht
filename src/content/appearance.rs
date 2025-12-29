@@ -1,5 +1,5 @@
 use super::*;
-use skia_safe::{Image, Paint, RRect};
+use skia_safe::{Image, RRect};
 
 #[derive(Debug)]
 pub(crate) enum Appearance {
@@ -55,10 +55,9 @@ impl Rectangle {
     }
 
     pub(crate) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        let mut paint = Paint::default();
+        let paint = &mut t.paint;
         paint.set_color(self.color);
-        paint.set_anti_alias(true);
-        t.surface.canvas().draw_rect(rect.to_rect(), &paint);
+        t.surface.canvas().draw_rect(rect.to_rect(), paint);
     }
 
     pub(crate) fn within(&self, rect: &FixedRect, c: &Coord2D) -> bool {
@@ -93,10 +92,9 @@ impl RoundRectangle {
     }
 
     pub(crate) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        let mut paint = Paint::default();
+        let paint = &mut t.paint;
         paint.set_color(self.color);
-        paint.set_anti_alias(true);
-        t.surface.canvas().draw_rrect(self.to_rrect(rect), &paint);
+        t.surface.canvas().draw_rrect(self.to_rrect(rect), paint);
     }
 
     pub(crate) fn within(&self, rect: &FixedRect, c: &Coord2D) -> bool {
@@ -131,10 +129,9 @@ impl RectangleCurve {
     }
 
     pub(crate) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        let mut paint = Paint::default();
+        let paint = &mut t.paint;
         paint.set_color(self.color);
-        paint.set_anti_alias(true);
-        t.surface.canvas().draw_rect(rect.to_rect(), &paint);
+        t.surface.canvas().draw_rect(rect.to_rect(), paint);
         let r = rect
             + (
                 (self.left, self.top),
@@ -192,17 +189,16 @@ impl RoundRectCurve {
     }
 
     pub(crate) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        let mut paint = Paint::default();
+        let paint = &mut t.paint;
         paint.set_color(self.color);
-        paint.set_anti_alias(true);
-        t.surface.canvas().draw_rrect(self.to_rrect(rect), &paint);
+        t.surface.canvas().draw_rrect(self.to_rrect(rect), paint);
         let r = rect
             + (
                 (self.left, self.top),
                 (-self.left - self.right, -self.top - self.bottom),
             );
         paint.set_color(*default_blank_color());
-        t.surface.canvas().draw_rrect(self.to_rrect(&r), &paint);
+        t.surface.canvas().draw_rrect(self.to_rrect(&r), paint);
     }
 
     pub(crate) fn within(&self, rect: &FixedRect, c: &Coord2D) -> bool {
