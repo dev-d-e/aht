@@ -3,7 +3,7 @@ use getset::{Getters, MutGetters, Setters};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
-use winit::event::{ElementState, StartCause, WindowEvent};
+use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -70,7 +70,7 @@ impl ApplicationHandler for WindowContext {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        let (renderer, window) = match self.r.as_mut() {
+        let (renderer, _window) = match self.r.as_mut() {
             Some(o) if o.1.id() == id => o,
             _ => return,
         };
@@ -88,7 +88,7 @@ impl ApplicationHandler for WindowContext {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let c: Coord2D = position.to_logical(self.page.scale_factor() as f64).into();
-                if let Some(a) = self.event_wrapper.analyse(EventRecord::Cursor(c)) {
+                if let Some(a) = self.event_wrapper.analyse(c) {
                     self.page.receive_action(a);
                 }
             }
@@ -129,17 +129,22 @@ impl ApplicationHandler for WindowContext {
                     ElementState::Released => {}
                 };
             }
-            WindowEvent::MouseInput { state, button, .. } => {
-                match state {
-                    ElementState::Pressed => {
-                        if let Some(c) = &self.event_wrapper.cursor {
-                            self.page.receive_action(ActionKind::Click(c.clone(), 0));
+            WindowEvent::MouseInput { state, button, .. } => match button {
+                MouseButton::Left => {
+                    match state {
+                        ElementState::Pressed => {
+                            if let Some(c) = &self.event_wrapper.cursor {
+                                self.page.receive_action(ActionKind::Click(c.clone(), 0));
+                            }
+                            self.event_wrapper.pressed.replace(0);
                         }
-                        self.event_wrapper.record.replace(EventRecord::Pressed(0));
-                    }
-                    ElementState::Released => {}
-                };
-            }
+                        ElementState::Released => {
+                            self.event_wrapper.pressed.take();
+                        }
+                    };
+                }
+                _ => {}
+            },
             WindowEvent::RedrawRequested => {
                 renderer.draw(&mut self.page);
                 self.fps_counter.count();
@@ -199,15 +204,10 @@ impl From<LogicalPosition<f32>> for Coord2D {
     }
 }
 
-enum EventRecord {
-    Cursor(Coord2D),
-    Pressed(u8),
-}
-
 struct WindowEventWrapper {
     focused: bool,
     cursor: Option<Coord2D>,
-    record: Option<EventRecord>,
+    pressed: Option<u8>,
 }
 
 impl Default for WindowEventWrapper {
@@ -215,24 +215,25 @@ impl Default for WindowEventWrapper {
         Self {
             focused: false,
             cursor: None,
-            record: None,
+            pressed: None,
         }
     }
 }
 
 impl WindowEventWrapper {
     fn clear(&mut self) {
-        self.record.take();
         self.cursor.take();
+        self.pressed.take();
     }
 
-    fn analyse(&mut self, e: EventRecord) -> Option<ActionKind> {
-        match e {
-            EventRecord::Cursor(o) => {
-                self.cursor.replace(o);
+    fn analyse(&mut self, o: Coord2D) -> Option<ActionKind> {
+        let mut r = None;
+        if let Some(_) = self.pressed {
+            if let Some(a) = &self.cursor {
+                r.replace(ActionKind::Sweep(a.clone(), o.clone()));
             }
-            EventRecord::Pressed(_) => {}
         }
-        None
+        self.cursor.replace(o);
+        r
     }
 }
