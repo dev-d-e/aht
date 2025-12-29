@@ -8,8 +8,6 @@ pub(super) trait Output {
 
     fn attribute_selector(&mut self, k: String, v: String);
 
-    fn start_block(&mut self);
-
     fn attribute(&mut self, k: String, v: String);
 
     fn end_block(&mut self);
