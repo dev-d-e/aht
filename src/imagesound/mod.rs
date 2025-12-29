@@ -1,7 +1,6 @@
 use crate::error::*;
 use crate::markup::*;
 use crate::utils::*;
-use bssf::*;
 use bytes::Bytes;
 use ffmpeg_next::codec::context::Context;
 use ffmpeg_next::decoder::{Audio, Video};
@@ -141,7 +140,8 @@ impl ImageDataReceiver {
         if self.fps_ctrl.is_next() {
             if let Ok(data) = self.data.try_recv() {
                 if let Some(i) = data.to_image(image_info, r) {
-                    self.buffer.replace(i);
+                    let o = self.buffer.replace(i);
+                    drop(o);
                 }
             }
         }
@@ -277,55 +277,6 @@ impl SoundDataReceiver {
     }
 }
 
-macro_rules! audio_data {
-    ($f:ident , $a:ident $(, $o:expr )+) => {{
-        match $a.format() {
-            Sample::None | Sample::U8(_) => {
-                let k = $f($($a.data($o),)*);
-                return Some(k.into());
-            }
-            Sample::I16(_) => {
-                let k = $f::<i16>($($a.plane($o),)*);
-                return Some(k.into());
-            }
-            Sample::I32(_) => {
-                let k = $f::<i32>($($a.plane($o),)*);
-                return Some(k.into());
-            }
-            Sample::I64(_) => {
-                let k = $f::<i32>($($a.plane($o),)*);
-                return Some(k.into());
-            }
-            Sample::F32(_) => {
-                let k = $f::<f32>($($a.plane($o),)*);
-                return Some(k.into());
-            }
-            Sample::F64(_) => {
-                let k = $f::<f64>($($a.plane($o),)*);
-                return Some(k.into());
-            }
-        }
-    }};
-}
-
-//Converts planar data to packed data.
-//Returns a Vec.
-fn audio_frame_to_array(audio_frame: &mut AudioFrame) -> Option<Vec<u8>> {
-    match audio_frame.planes() {
-        1 => {
-            return Some(audio_frame.data(0).into());
-        }
-        2 => audio_data!(build_2, audio_frame, 0, 1),
-        3 => audio_data!(build_3, audio_frame, 0, 1, 2),
-        4 => audio_data!(build_4, audio_frame, 0, 1, 2, 3),
-        5 => audio_data!(build_5, audio_frame, 0, 1, 2, 3, 4),
-        6 => audio_data!(build_6, audio_frame, 0, 1, 2, 3, 4, 5),
-        7 => audio_data!(build_7, audio_frame, 0, 1, 2, 3, 4, 5, 6),
-        8 => audio_data!(build_8, audio_frame, 0, 1, 2, 3, 4, 5, 6, 7),
-        _ => None,
-    }
-}
-
 struct AudioConsumer {
     decoder: Audio,
     swr_context: Option<SwrContext>,
@@ -338,6 +289,11 @@ impl AudioConsumer {
         let (sender, receiver) = SoundDataReceiver::build_channel();
 
         let p = SoundProperty::new(&decoder);
+
+        let swr_context = decoder
+            .resampler(p.format, decoder.channel_layout(), p.rate)
+            .inspect_err(|e| error!("swr_context: {e}"))
+            .ok();
 
         let sound_thread = std::thread::spawn(|| {
             #[cfg(target_os = "linux")]
@@ -352,15 +308,27 @@ impl AudioConsumer {
 
         Self {
             decoder,
-            swr_context: None,
+            swr_context,
             sender,
             sound_thread,
         }
     }
 
     fn audio_frame(&mut self, audio_frame: &mut AudioFrame) {
-        if let Some(k) = audio_frame_to_array(audio_frame) {
-            self.sender.send(SoundData::from(k));
+        if audio_frame.is_planar() {
+            if let Some(s) = &mut self.swr_context {
+                let mut out = AudioFrame::empty();
+                let _ = s.run(audio_frame, &mut out);
+                let dat = out.data(0);
+                if dat.len() > 0 {
+                    self.sender.send(SoundData::from_slice(dat));
+                }
+            }
+        } else {
+            let dat = audio_frame.data(0);
+            if dat.len() > 0 {
+                self.sender.send(SoundData::from_slice(dat));
+            }
         }
     }
 
@@ -455,6 +423,7 @@ impl MediaWrapper {
                         while consumer.decoder.receive_frame(&mut decoded).is_ok() {
                             consumer.video_frame(&mut decoded, &sender);
                         }
+                        drop(decoded);
                     }
                     DecoderType::Audio(consumer) => {
                         decode_ctrl(
@@ -477,6 +446,7 @@ impl MediaWrapper {
                         while consumer.decoder.receive_frame(&mut decoded).is_ok() {
                             consumer.audio_frame(&mut decoded);
                         }
+                        drop(decoded);
                     }
                     DecoderType::None => {}
                 }
@@ -547,6 +517,7 @@ pub(crate) fn build(s: String) -> ImageDataReceiver {
     receiver
 }
 
+#[derive(Debug)]
 struct SoundProperty {
     channels: u32,
     rate: u32,
@@ -560,7 +531,7 @@ impl SoundProperty {
         Self {
             channels: decoder.channels() as u32,
             rate: decoder.rate(),
-            format: decoder.format(),
+            format: decoder.format().packed(),
             period_size: 0,
             buffer_size: 0,
         }
