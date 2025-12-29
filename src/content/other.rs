@@ -27,7 +27,7 @@ impl Canv {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Default::default(),
             scroll_bar: Default::default(),
         }
@@ -83,7 +83,7 @@ impl Iframe {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Default::default(),
         }
     }
