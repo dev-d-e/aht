@@ -73,7 +73,7 @@ where
                     self.output.root(n);
                 }
                 Err(e) => {
-                    error!("<{e}");
+                    error!("output_colon: {e}");
                 }
             };
         }
@@ -88,7 +88,7 @@ where
                     self.output.upper(n);
                 }
                 Err(e) => {
-                    error!("<{e}");
+                    error!("output_circumflex_accent: {e}");
                 }
             };
         }
@@ -96,7 +96,7 @@ where
 
     fn output_tag(&mut self) {
         if !self.temporary.0.is_empty() {
-            let s = self.temporary.0.drain(..).as_str().to_string();
+            let s = self.temporary.0.drain(..).as_str().to_lowercase();
             self.output.tag(s);
         }
     }
@@ -184,11 +184,9 @@ where
     }
 
     fn tag_0_1(&mut self) {
-        let c = self.c;
-        match c {
+        match self.c {
             LT => {
-                self.current_function = Self::ignore;
-                self.next_function = Self::tag_1;
+                self.current_function = Self::tag_1;
             }
             _ => {}
         }
@@ -198,18 +196,35 @@ where
         let c = self.c;
         match c {
             GT => {
-                self.tag_5();
+                self.current_function = Self::tag_0_1;
             }
             SPACE => {
                 self.output_child();
                 self.current_function = Self::series_space;
-                self.next_function = Self::tag_2;
+                self.next_function = Self::tag_1_1;
             }
             CIRCUMFLEX_ACCENT => {
                 self.current_function = Self::tag_3;
             }
             COLON => {
                 self.current_function = Self::tag_4;
+            }
+            LF | CR => {
+                self.output_error("illegal char");
+            }
+            _ => {
+                self.current_function = Self::tag_2;
+                self.tag_2();
+            }
+        }
+    }
+
+    fn tag_1_1(&mut self) {
+        match self.c {
+            LF | CR => {
+                self.output_error("illegal char");
+                self.current_function = Self::ignore;
+                self.next_function = Self::tag_2;
             }
             _ => {
                 self.current_function = Self::tag_2;
@@ -229,10 +244,14 @@ where
                 self.current_function = Self::ignore;
                 self.next_function = Self::text_0;
             }
-            SPACE | LF | CR => {
+            SPACE => {
                 self.output_tag();
                 self.current_function = Self::ignore;
-                self.next_function = Self::attribute_0;
+                self.next_function = Self::tag_5;
+            }
+            LF | CR => {
+                self.output_tag();
+                self.current_function = Self::tag_6;
             }
             _ => {
                 self.output_error("invalid mark");
@@ -270,20 +289,6 @@ where
         }
     }
 
-    fn tag_3_1(&mut self) {
-        match self.c {
-            SPACE | LF | CR => {
-                self.current_function = Self::ignore;
-                self.next_function = Self::tag_2;
-            }
-            LT => {
-                self.current_function = Self::tag_0;
-                self.tag_0();
-            }
-            _ => {}
-        }
-    }
-
     fn tag_4(&mut self) {
         let c = self.c;
         match c {
@@ -305,11 +310,33 @@ where
 
     fn tag_5(&mut self) {
         match self.c {
-            LT => {
-                self.current_function = Self::tag_0;
-                self.tag_0();
+            GT => {
+                self.output_child();
+                self.current_function = Self::ignore;
+                self.next_function = Self::text_0;
             }
-            _ => {}
+            _ => {
+                self.current_function = Self::attribute_0;
+                self.attribute_0();
+            }
+        }
+    }
+
+    fn tag_6(&mut self) {
+        match self.c {
+            SPACE => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::tag_5;
+            }
+            LF | CR => {}
+            GT => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::text_0;
+            }
+            _ => {
+                self.current_function = Self::attribute_0;
+                self.attribute_0();
+            }
         }
     }
 
@@ -350,11 +377,11 @@ where
         let c = self.c;
         match c {
             EQUAL => {
-                self.current_function = Self::series_space;
+                self.current_function = Self::ignore;
                 self.next_function = Self::attribute_2;
             }
             SPACE => {
-                self.current_function = Self::series_space;
+                self.current_function = Self::ignore;
                 self.next_function = Self::attribute_1_1;
             }
             GT => {
@@ -368,15 +395,10 @@ where
     }
 
     fn attribute_1_1(&mut self) {
-        let c = self.c;
-        match c {
-            EQUAL => {
-                self.current_function = Self::series_space;
-                self.next_function = Self::attribute_2;
-            }
-            GT => {
-                self.current_function = Self::attribute_3;
-                self.attribute_3();
+        match self.c {
+            EQUAL | GT => {
+                self.current_function = Self::attribute_1;
+                self.attribute_1();
             }
             _ => {
                 self.output_attribute();
