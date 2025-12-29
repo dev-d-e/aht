@@ -30,13 +30,13 @@ impl Button {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 60.0),
+            rect: (100.0, 60.0).into(),
             painter: RoundRectangle {
                 color: *default_button_color(),
                 ..Default::default()
             }
             .into(),
-            draw_text: DrawText::new(AlignPattern::center_middle()),
+            draw_text: AlignPattern::center_middle().into(),
             time_meter: Chronograph::new(1000),
             f: false,
         }
@@ -118,7 +118,7 @@ impl Inp {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 30.0),
+            rect: (100.0, 30.0).into(),
             painter: RectangleCurve {
                 color: *default_border_color(),
                 ..Default::default()
@@ -200,7 +200,7 @@ impl Opt {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Default::default(),
         }
     }
@@ -238,7 +238,7 @@ impl Pt {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: RectangleCurve {
                 color: *default_border_color(),
                 ..Default::default()
@@ -259,12 +259,30 @@ impl Pt {
         self.painter.draw(&self.rect, t);
 
         if let Ok(e) = self.element.read() {
-            self.draw_text.draw(&self.rect, e.text(), t);
+            let s = e.text();
+            t.paint.set_color(*default_font_color());
+            let dt = &self.draw_text;
+            let size = dt.apply_font().text_size(s, t);
+            let h = self.rect.side().height().max(size.height());
+            let max = (size.width(), h).into();
+            let vision = self.scroll_bar.resize(&self.rect, &max);
+            let (c, a) = dt.align_pattern().font_xy(&self.rect, size.height());
+            let font = dt.apply_font().font();
+            t.draw_in_vision(&vision, &self.rect, |surface2, paint| {
+                surface2.canvas().draw_str_align(s, &c, font, paint, a);
+            });
+            self.scroll_bar.draw(t);
         }
     }
 
     pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
         match &t.kind {
+            ActionKind::Sweep(a, b) => {
+                if self.scroll_bar.within(b) {
+                    self.scroll_bar.move_a_to_b(a, b);
+                    return;
+                }
+            }
             _ => {}
         }
     }
@@ -306,7 +324,7 @@ impl Select {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: RectangleCurve {
                 color: *default_border_color(),
                 ..Default::default()
@@ -373,7 +391,7 @@ impl Time {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Rectangle {
                 color: *default_surface_color(),
                 ..Default::default()
