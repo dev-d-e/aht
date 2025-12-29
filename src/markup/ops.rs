@@ -155,7 +155,6 @@ where
     f: T,
     #[getset(get_copy = "pub", set = "pub")]
     n: usize,
-    i: usize,
 }
 
 impl<T> FindPrecedingSibling<T>
@@ -164,7 +163,7 @@ where
 {
     ///Creates a new instance. `n` is range, searches all preceding sibling if it's 0.
     pub fn new(f: T, n: usize) -> Self {
-        Self { f, n, i: n }
+        Self { f, n }
     }
 
     fn subset_start_index(&self, i: usize) -> usize {
