@@ -14,7 +14,7 @@ use crate::markup::*;
 use crate::page::*;
 use crate::utils::*;
 use getset::{Getters, MutGetters};
-use skia_safe::Surface;
+use skia_safe::{Paint, Surface};
 use std::sync::{Arc, RwLock};
 
 #[derive(Getters, MutGetters)]
@@ -52,7 +52,7 @@ impl Body {
         let mut o = Self {
             element,
             subset: Default::default(),
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Rectangle::default().into(),
             align_pattern: Default::default(),
             layout: Default::default(),
@@ -166,7 +166,7 @@ impl Area {
         let mut o = Self {
             element,
             subset: Default::default(),
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Default::default(),
             align_pattern: Default::default(),
             layout: Default::default(),
@@ -224,10 +224,6 @@ impl Area {
                 if self.rect.within(a) || self.rect.within(b) {
                     return self.subset.consume_action(t);
                 }
-            }
-            ActionKind::InputStr(_) => {
-                t.finish = true;
-                return;
             }
             _ => {
                 return self.subset.consume_action(t);
@@ -438,11 +434,50 @@ deref!(DrawUnitHolder, Vec<DrawUnit>, 0);
 pub(crate) struct DrawCtx<'a> {
     surface: Surface,
     context: &'a mut PageContext,
+    paint: Paint,
 }
 
 impl<'a> DrawCtx<'a> {
     pub(crate) fn new(surface: Surface, context: &'a mut PageContext) -> Self {
-        Self { surface, context }
+        let mut paint = Paint::default();
+        paint.set_color(*default_bg_color());
+        paint.set_anti_alias(true);
+        Self {
+            surface,
+            context,
+            paint,
+        }
+    }
+
+    pub(crate) fn draw_in_rect(
+        &mut self,
+        rect: &FixedRect,
+        mut f: impl FnMut(&mut Surface, &Paint),
+    ) {
+        let surface = &mut self.surface;
+        let info = surface.image_info().with_dimensions(rect.side());
+        if let Some(mut surface2) = surface.new_surface(&info) {
+            f(&mut surface2, &self.paint);
+            let image2 = surface2.image_snapshot();
+            surface.canvas().draw_image(image2, &***rect, None);
+        }
+    }
+
+    pub(crate) fn draw_in_vision(
+        &mut self,
+        vision: &FixedRect,
+        rect: &FixedRect,
+        mut f: impl FnMut(&mut Surface, &Paint),
+    ) {
+        let surface = &mut self.surface;
+        let info = surface.image_info().with_dimensions(vision.right_bottom());
+        if let Some(mut surface2) = surface.new_surface(&info) {
+            f(&mut surface2, &self.paint);
+
+            if let Some(image2) = surface2.image_snapshot_with_bounds(vision.to_irect()) {
+                surface.canvas().draw_image(image2, &***rect, None);
+            }
+        }
     }
 }
 
