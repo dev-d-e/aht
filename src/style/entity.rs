@@ -251,10 +251,6 @@ impl Output for StyleSheetBuilder {
         }
     }
 
-    fn start_block(&mut self) {
-        todo!()
-    }
-
     fn attribute(&mut self, k: String, mut v: String) {
         match Attribute::from_s(&k, &mut v) {
             Ok(a) => match self.k {
