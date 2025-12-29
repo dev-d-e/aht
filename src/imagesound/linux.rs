@@ -43,13 +43,14 @@ impl Sound {
         let io = self.pcm.io_bytes();
         while let Ok(w) = receiver.data.recv() {
             match w {
-                SoundDataWrapper::Data(buf) => {
+                SoundDataWrapper::Data(ref buf) => {
                     let _ = io.writei(&buf.bytes);
                 }
                 SoundDataWrapper::Pause(n) => {
                     let _ = self.pcm.pause(n);
                 }
             }
+            drop(w);
         }
         if self.pcm.state() != State::Running {
             let _ = self.pcm.start();
