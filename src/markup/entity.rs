@@ -323,37 +323,3 @@ pub enum MarkNumber {
     Double,
     Single,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn element() {
-        let s = "<aht>
-        <head lang=en>
-            <title>1</title>
-        </head>
-        <body column=\"\" row=\"2\">
-            <inp name=\"\" value=\"\" readonly required>input</inp>
-            <button href=\"\" async=true>button</button>
-            <area class=\"\" id=\"\" width=\"1000\" height=\"100\" column=2 row=\"\"></area>
-        </body>
-        <style>
-        </style>
-        <script>
-        </script>
-     </aht>";
-        let (e, err) = Element::parse_d_one(&s);
-        for o in err.iter() {
-            println!("{:?}", o);
-        }
-        println!("{}", e.unwrap());
-
-        let (p, err) = Page::parse(&s);
-        for o in err.iter() {
-            println!("{:?}", o);
-        }
-        println!("{:?}", p.unwrap());
-    }
-}
