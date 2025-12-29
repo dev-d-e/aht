@@ -30,7 +30,7 @@ impl Audio {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Rectangle {
                 color: *default_surface_color(),
                 ..Default::default()
@@ -110,7 +110,7 @@ impl Img {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: RectangleCurve {
                 color: *default_border_color(),
                 ..Default::default()
@@ -198,7 +198,7 @@ impl Video {
     pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
         Self {
             element,
-            rect: FixedRect::with_side(100.0, 100.0),
+            rect: (100.0, 100.0).into(),
             painter: Rectangle {
                 color: *default_surface_color(),
             }
