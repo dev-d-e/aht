@@ -482,7 +482,7 @@ impl FromStr for ScriptType {
     fn from_str(s: &str) -> Result<Self> {
         match s {
             JS => Ok(Self::JS),
-            _ => Err((ErrorKind::Script, "unsupported").into()),
+            _ => Err((ErrorKind::Script, s).into()),
         }
     }
 }
@@ -529,13 +529,6 @@ impl RectSide {
         self.width == 0.0 || self.height == 0.0
     }
 
-    pub(crate) fn same_ratio(&self, r: &Self, r2: &Self) -> Self {
-        Self::new(
-            self.width * r.width / r2.width,
-            self.height * r.height / r2.height,
-        )
-    }
-
     pub(crate) fn get_attr(&mut self, e: &Element, r: &Self) {
         if let Some(a) = e.attribute().width() {
             self.width = a.get(r.width);
@@ -551,6 +544,12 @@ impl Add<(f32, f32)> for &RectSide {
 
     fn add(self, other: (f32, f32)) -> Self::Output {
         RectSide::new(self.width + other.0, self.height + other.1)
+    }
+}
+
+impl From<(f32, f32)> for RectSide {
+    fn from(o: (f32, f32)) -> Self {
+        Self::new(o.0, o.1)
     }
 }
 
