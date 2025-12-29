@@ -4,7 +4,7 @@ use getset::{CopyGetters, Getters, MutGetters, Setters};
 use skia_safe::codec::{gif_decoder, jpeg_decoder, png_decoder, webp_decoder};
 use skia_safe::codecs::Decoder;
 use skia_safe::utils::text_utils::Align;
-use skia_safe::{EncodedImageFormat, Font, IRect, Image, Paint, Rect, SamplingOptions};
+use skia_safe::{EncodedImageFormat, Font, IRect, Image, Rect, SamplingOptions};
 use std::io::Read;
 use std::ops::Add;
 use std::sync::Arc;
@@ -28,10 +28,6 @@ impl std::fmt::Debug for FixedRect {
 impl FixedRect {
     pub(crate) fn new(pos: Coord, side: RectSide) -> Self {
         Self { pos, side }
-    }
-
-    pub(crate) fn with_side(width: f32, height: f32) -> Self {
-        Self::new(Default::default(), RectSide::new(width, height))
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -124,6 +120,24 @@ impl Add<((f32, f32, f32), (f32, f32))> for &FixedRect {
 
     fn add(self, other: ((f32, f32, f32), (f32, f32))) -> Self::Output {
         FixedRect::new(&self.pos + other.0, &self.side + other.1)
+    }
+}
+
+impl From<Coord> for FixedRect {
+    fn from(o: Coord) -> Self {
+        Self::new(o, Default::default())
+    }
+}
+
+impl From<RectSide> for FixedRect {
+    fn from(o: RectSide) -> Self {
+        Self::new(Default::default(), o)
+    }
+}
+
+impl From<(f32, f32)> for FixedRect {
+    fn from(o: (f32, f32)) -> Self {
+        RectSide::new(o.0, o.1).into()
     }
 }
 
@@ -220,6 +234,11 @@ impl ApplyFont {
             font,
         })
     }
+
+    pub(crate) fn text_size(&self, text: &str, t: &mut DrawCtx) -> Rect {
+        let text_size = self.font.measure_str(text, Some(&t.paint));
+        text_size.1
+    }
 }
 
 #[derive(Debug)]
@@ -299,8 +318,9 @@ impl AlignPattern {
 pub(crate) struct DrawText {
     #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
     cursor: bool,
-    #[getset(set = "pub(crate)")]
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)", set = "pub(crate)")]
     align_pattern: AlignPattern,
+    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
     apply_font: ApplyFont,
     time_meter: Chronograph,
     interval: f32,
@@ -329,40 +349,49 @@ impl Default for DrawText {
 }
 
 impl DrawText {
-    pub(crate) fn new(align_pattern: AlignPattern) -> Self {
-        Self {
-            cursor: false,
-            align_pattern,
-            apply_font: Default::default(),
-            time_meter: Chronograph::new(1000),
-            interval: 20.0,
-        }
-    }
-
     pub(crate) fn draw(&mut self, rect: &FixedRect, text: &str, t: &mut DrawCtx) {
-        let mut paint = Paint::default();
+        let paint = &mut t.paint;
         if let Some(color) = self.apply_font.color() {
             paint.set_color(*color);
         } else {
             paint.set_color(*default_font_color());
         }
-        paint.set_anti_alias(true);
 
         let font = self.apply_font.font();
-        let text_size = font.measure_str(text, Some(&paint));
-        let text_w = text_size.1.width();
-        let text_h = text_size.1.height();
+        let size = self.apply_font.text_size(text, t);
+        let text_w = size.width();
+        let text_h = size.height();
         let (c, a) = self.align_pattern.font_xy(rect, text_h);
-        t.surface.canvas().draw_str_align(text, &c, font, &paint, a);
+        if text_w <= rect.side.width() {
+            let paint = &t.paint;
+            t.surface.canvas().draw_str_align(text, &c, font, paint, a);
+        } else {
+            let rect2 = rect.side.clone().into();
+            let (c, a) = self.align_pattern.font_xy(&rect2, text_h);
+            t.draw_in_rect(rect, |surface2, paint| {
+                surface2.canvas().draw_str_align(text, &c, font, paint, a);
+            });
+        }
+
         if self.cursor {
             if self.time_meter.elapsed() {
                 self.time_meter.refresh();
             } else {
+                let paint = &mut t.paint;
                 let point0 = &c + (text_w + 2.0, (self.interval - text_h / 2.0) / 2.0);
                 let point1 = &point0 + (0.0, -self.interval);
                 paint.set_color(*default_cursor_color());
-                t.surface.canvas().draw_line(point0, point1, &paint);
+                t.surface.canvas().draw_line(point0, point1, paint);
             }
+        }
+    }
+}
+
+impl From<AlignPattern> for DrawText {
+    fn from(align_pattern: AlignPattern) -> Self {
+        Self {
+            align_pattern,
+            ..Default::default()
         }
     }
 }
@@ -400,11 +429,11 @@ impl Default for ScrollBar {
             painter: Rectangle::new(*default_scroll_bar2_color()).into(),
             scroll_bar: Rectangle::new(*default_scroll_bar_color()).into(),
             hor_show: false,
-            hor_rect: FixedRect::with_side(0.0, 20.0),
+            hor_rect: (0.0, 20.0).into(),
             hor_f_offset: 0.0,
             hor_f_length: 0.0,
             ver_show: false,
-            ver_rect: FixedRect::with_side(20.0, 0.0),
+            ver_rect: (20.0, 0.0).into(),
             ver_f_offset: 0.0,
             ver_f_length: 0.0,
         }
