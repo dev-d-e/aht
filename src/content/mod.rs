@@ -107,6 +107,8 @@ impl Body {
                 if self.scroll_bar.within(c) {
                     return;
                 }
+                let (x, y) = self.scroll_bar.vision_var();
+                t.kind.set_var_cursor(x, y);
             }
             ActionKind::Sweep(a, b) => {
                 if self.scroll_bar.within(b) {
@@ -212,7 +214,11 @@ impl Area {
                         t.finish = true;
                         return;
                     }
-                    return self.subset.consume_action(t);
+                    let (x, y) = self.scroll_bar.vision_var();
+                    t.kind.set_var_cursor(x, y);
+                    self.subset.consume_action(t);
+                    t.kind.set_var_cursor(-x, -y);
+                    return;
                 }
             }
             ActionKind::Sweep(a, b) => {
@@ -222,7 +228,11 @@ impl Area {
                     return;
                 }
                 if self.rect.within(a) || self.rect.within(b) {
-                    return self.subset.consume_action(t);
+                    let (x, y) = self.scroll_bar.vision_var();
+                    t.kind.set_var_cursor(x, y);
+                    self.subset.consume_action(t);
+                    t.kind.set_var_cursor(-x, -y);
+                    return;
                 }
             }
             _ => {
