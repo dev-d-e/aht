@@ -233,3 +233,26 @@ pub enum ActionKind {
     DeleteBack(Coord2D, u32),
     Sweep(Coord2D, Coord2D),
 }
+
+impl ActionKind {
+    pub(crate) fn set_var_cursor(&mut self, x: f32, y: f32) {
+        match self {
+            Self::Click(c, _)
+            | Self::DoubleClick(c, _)
+            | Self::Cursor(c)
+            | Self::CursorWithoutFocus(c)
+            | Self::DeleteFront(c, _)
+            | Self::DeleteBack(c, _) => {
+                c.set_x(c.x() + x);
+                c.set_y(c.y() + y);
+            }
+            Self::Sweep(a, b) => {
+                a.set_x(a.x() + x);
+                a.set_y(a.y() + y);
+                b.set_x(b.x() + x);
+                b.set_y(b.y() + y);
+            }
+            _ => {}
+        }
+    }
+}
