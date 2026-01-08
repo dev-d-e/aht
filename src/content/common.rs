@@ -420,6 +420,8 @@ pub(crate) struct ScrollBar {
     ver_rect: FixedRect,
     ver_f_offset: f32,
     ver_f_length: f32,
+    #[getset(get_copy = "pub(crate)")]
+    vision_var: (f32, f32),
 }
 
 impl Default for ScrollBar {
@@ -436,6 +438,7 @@ impl Default for ScrollBar {
             ver_rect: (20.0, 0.0).into(),
             ver_f_offset: 0.0,
             ver_f_length: 0.0,
+            vision_var: Default::default(),
         }
     }
 }
@@ -508,24 +511,25 @@ impl ScrollBar {
         let max_h = max.height();
         let max_w = max.width();
 
-        match self.scroll_bar_type {
+        self.vision_var = match self.scroll_bar_type {
             ScrollBarType::Both => {
                 self.ver_resize(r, max_h);
                 self.hor_resize(r, max_w);
-                r + (
+                (
                     self.hor_f_offset * max_w / vision_w,
                     self.ver_f_offset * max_h / vision_h,
                 )
             }
             ScrollBarType::Horizontal => {
                 self.hor_resize(r, max_w);
-                r + (self.hor_f_offset * max_w / vision_w, 0.0)
+                (self.hor_f_offset * max_w / vision_w, 0.0)
             }
             ScrollBarType::Vertical => {
                 self.ver_resize(r, max_h);
-                r + (0.0, self.ver_f_offset * max_h / vision_h)
+                (0.0, self.ver_f_offset * max_h / vision_h)
             }
-        }
+        };
+        r + self.vision_var
     }
 
     fn ver_draw(&mut self, t: &mut DrawCtx) {
@@ -646,8 +650,12 @@ impl VideoReader {
         Self { result: receiver }
     }
 
-    pub(super) fn time(&mut self, n: i64) {
+    pub(super) fn time(&mut self, n: f32) {
         self.result.ctrl_seek(n);
+    }
+
+    pub(super) fn pause(&mut self, o: bool) {
+        self.result.ctrl_pause(o);
     }
 
     pub(super) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
@@ -655,6 +663,12 @@ impl VideoReader {
         if let Some(i) = self.result.data(info, rect.side()) {
             t.surface.canvas().draw_image(i, &***rect, None);
         }
+    }
+}
+
+impl Drop for VideoReader {
+    fn drop(&mut self) {
+        self.result.ctrl_close();
     }
 }
 
@@ -669,11 +683,21 @@ impl AudioReader {
         Self { result: receiver }
     }
 
-    pub(super) fn time(&mut self, n: i64) {
+    pub(super) fn time(&mut self, n: f32) {
         self.result.ctrl_seek(n);
+    }
+
+    pub(super) fn pause(&mut self, o: bool) {
+        self.result.ctrl_pause(o);
     }
 
     pub(super) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
         self.result.none();
+    }
+}
+
+impl Drop for AudioReader {
+    fn drop(&mut self) {
+        self.result.ctrl_close();
     }
 }
