@@ -39,18 +39,40 @@ impl Sound {
             .ok()
     }
 
-    pub(super) fn playback(&mut self, receiver: SoundDataReceiver) {
+    pub(super) async fn playback(&mut self, mut receiver: SoundDataReceiver) {
         let io = self.pcm.io_bytes();
-        while let Ok(w) = receiver.data.recv() {
-            match w {
-                SoundDataWrapper::Data(ref buf) => {
-                    let _ = io.writei(&buf.bytes);
+        loop {
+            tokio::select! {
+                o = receiver.data.recv() => {
+                    if let Some(buf) = o {
+                        if let Err(e) = io.writei(buf.bytes()) {
+                            debug!("{e}");
+                        }
+                        drop(buf);
+                    } else {
+                        break;
+                    }
                 }
-                SoundDataWrapper::Pause(n) => {
-                    let _ = self.pcm.pause(n);
+                r = receiver.ctrl.recv() => {
+                    match r {
+                        Ok(o) => {
+                            match o{
+                                ImageCtrl::Seek(_)  => {},
+                                ImageCtrl::Pause(o) => {
+                                    let _ = self.pcm.pause(o);
+                                },
+                                ImageCtrl::Close => {
+                                    let _ = self.pcm.drain();
+                                    return ;
+                                },
+                            }
+                        },
+                        Err(e) => {
+                            debug!("{e}");
+                        },
+                    }
                 }
             }
-            drop(w);
         }
         if self.pcm.state() != State::Running {
             let _ = self.pcm.start();
