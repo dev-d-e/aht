@@ -5,30 +5,39 @@ use ffmpeg_next::codec::context::Context;
 use ffmpeg_next::decoder::{Audio, Video};
 use ffmpeg_next::ffi::*;
 use ffmpeg_next::format::context::Input;
-use ffmpeg_next::format::{input, Pixel, Sample};
+use ffmpeg_next::format::{Pixel, Sample, input};
 use ffmpeg_next::frame::{Audio as AudioFrame, Video as VideoFrame};
 use ffmpeg_next::media::Type as MediaType;
 use ffmpeg_next::rescale::TIME_BASE;
 use ffmpeg_next::software::resampling::Context as SwrContext;
 use ffmpeg_next::software::scaling::Context as SwsContext;
-use ffmpeg_next::{Packet, Rescale, Stream};
-use getset::{Getters, MutGetters};
-use skia_safe::{images, ColorType, Data, ISize, Image, ImageInfo, SamplingOptions, Size};
-use std::collections::HashMap;
+use ffmpeg_next::{Packet, Rational, Rescale};
+use skia_safe::{ColorType, Data, ISize, Image, ImageInfo, SamplingOptions, Size, images};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use tokio::runtime::{Handle, Runtime};
+use tokio::sync::Barrier;
 use tokio::sync::broadcast::{
-    channel as broadcast_channel, Receiver as BroadcastReceiver, Sender as BroadcastSender,
+    Receiver as BroadcastReceiver, Sender as BroadcastSender, channel as broadcast_channel,
 };
-use tokio::sync::mpsc::{channel as mpsc_channel, Receiver as MpscReceiver, Sender as MpscSender};
+use tokio::sync::mpsc::{
+    Receiver as MpscReceiver, Sender as MpscSender, channel as mpsc_channel, error::TrySendError,
+};
+use tokio::time::{Duration, Interval, MissedTickBehavior, interval};
 
 const CTRL_SIZE: usize = 8;
 
-const VIDEO_PACKET_SIZE: usize = 256;
-const IMAGE_DATA_SIZE: usize = 8;
-const IMAGE_DATA_FPS: f32 = 24.0;
+const VIDEO_PACKET_SIZE: usize = 1000;
+const IMAGE_DATA_SIZE: usize = 100;
 
-const AUDIO_PACKET_SIZE: usize = 32;
-const SOUND_DATA_SIZE: usize = 1;
+const AUDIO_PACKET_SIZE: usize = 8;
+const SOUND_DATA_SIZE: usize = 8;
+
+fn interval_millis() -> Interval {
+    let mut interval = interval(Duration::from_millis(100));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    interval
+}
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -91,101 +100,87 @@ impl From<VideoFrame> for ImageData {
     }
 }
 
-#[derive(Clone, Debug)]
-enum ImageCtrl {
-    Seek(f32),
-    Pause(bool),
-    Close,
-}
-
 #[derive(Debug)]
-struct ImageDataSender {
-    data: MpscSender<ImageData>,
-    ctrl: BroadcastReceiver<ImageCtrl>,
-}
-
-impl ImageDataSender {
-    fn new(data: MpscSender<ImageData>, ctrl: BroadcastReceiver<ImageCtrl>) -> Self {
-        Self { data, ctrl }
-    }
-}
-
-#[derive(Debug, Getters, MutGetters)]
-pub(crate) struct ImageDataReceiver {
-    data: MpscReceiver<ImageData>,
+pub(crate) struct ImageDataOutput {
     buffer: Option<Image>,
-    ctrl: BroadcastSender<ImageCtrl>,
-    fps_ctrl: FpsCtrl,
-    pause: bool,
+    data_receiver: Option<MpscReceiver<ImageData>>,
+    pause_sender: BroadcastSender<bool>,
+    seek_sender: MpscSender<(u32, u32)>,
+    close_sender: MpscSender<()>,
 }
 
-impl ImageDataReceiver {
-    fn new(data: MpscReceiver<ImageData>, ctrl: BroadcastSender<ImageCtrl>) -> Self {
+impl ImageDataOutput {
+    fn new(
+        data_receiver: Option<MpscReceiver<ImageData>>,
+        pause_sender: BroadcastSender<bool>,
+        seek_sender: MpscSender<(u32, u32)>,
+        close_sender: MpscSender<()>,
+    ) -> Self {
         Self {
-            data,
             buffer: None,
-            ctrl,
-            fps_ctrl: FpsCtrl::new(IMAGE_DATA_FPS),
-            pause: false,
+            data_receiver,
+            pause_sender,
+            seek_sender,
+            close_sender,
         }
     }
 
     pub(crate) fn data(&mut self, image_info: ImageInfo, r: &RectSide) -> &Option<Image> {
-        if !self.pause {
-            if self.fps_ctrl.is_next() {
-                if let Ok(data) = self.data.try_recv() {
-                    if let Some(i) = data.to_image(image_info, r) {
-                        let o = self.buffer.replace(i);
-                        drop(o);
-                    }
+        if let Some(receiver) = &mut self.data_receiver {
+            if let Ok(data) = receiver.try_recv() {
+                if let Some(i) = data.to_image(image_info, r) {
+                    let o = self.buffer.replace(i);
+                    drop(o);
                 }
             }
         }
         return &self.buffer;
     }
 
-    pub(crate) fn none(&mut self) {
-        if let Ok(data) = self.data.try_recv() {
-            drop(data)
-        }
+    pub(crate) fn pause(&mut self, o: bool) -> bool {
+        self.pause_sender.send(o).is_ok()
     }
 
-    fn ctrl(&mut self, c: ImageCtrl) -> bool {
-        self.ctrl.send(c).is_ok()
-    }
-
-    pub(crate) fn ctrl_seek(&mut self, o: f32) -> bool {
-        self.ctrl(ImageCtrl::Seek(o))
-    }
-
-    pub(crate) fn ctrl_pause(&mut self, o: bool) -> bool {
-        self.pause = o;
-        self.ctrl(ImageCtrl::Pause(o))
-    }
-
-    pub(crate) fn ctrl_close(&mut self) {
-        self.ctrl(ImageCtrl::Close);
+    pub(crate) fn seek(&mut self, o: (u32, u32)) -> bool {
+        self.seek_sender.try_send(o).is_ok()
     }
 }
 
-fn image_build_channel() -> (ImageDataSender, ImageDataReceiver) {
-    let (sender, receiver) = mpsc_channel(IMAGE_DATA_SIZE);
-    let (sender2, receiver2) = broadcast_channel(CTRL_SIZE);
-    (
-        ImageDataSender::new(sender, receiver2),
-        ImageDataReceiver::new(receiver, sender2),
-    )
+impl Drop for ImageDataOutput {
+    fn drop(&mut self) {
+        let _ = self.close_sender.try_send(());
+        if let Some(receiver) = &mut self.data_receiver {
+            receiver.close();
+        }
+        info!("ImageDataOutput close");
+    }
 }
 
 struct VideoConsumer {
     decoder: Video,
     sws_context: Option<SwsContext>,
+    stream: StreamData,
+    rate: Rational,
+    v_packet: VecDeque<Packet>,
+    v_frame: VecDeque<VideoFrame>,
     packet_receiver: MpscReceiver<Packet>,
-    sender: ImageDataSender,
+    data_sender: MpscSender<ImageData>,
+    time_receiver: MpscReceiver<i64>,
+    pause_receiver: BroadcastReceiver<bool>,
+    seek_receiver: MpscReceiver<Arc<Barrier>>,
 }
 
 impl VideoConsumer {
-    fn new(decoder: Video, packet_receiver: MpscReceiver<Packet>, sender: ImageDataSender) -> Self {
+    fn new(
+        decoder: Video,
+        stream: StreamData,
+        rate: Rational,
+        packet_receiver: MpscReceiver<Packet>,
+        data_sender: MpscSender<ImageData>,
+        time_receiver: MpscReceiver<i64>,
+        pause_receiver: BroadcastReceiver<bool>,
+        seek_receiver: MpscReceiver<Arc<Barrier>>,
+    ) -> Self {
         let sws_context = decoder
             .converter(Pixel::RGBA)
             .inspect_err(|e| error!("sws_context: {e:?}"))
@@ -194,120 +189,163 @@ impl VideoConsumer {
         Self {
             decoder,
             sws_context,
+            stream,
+            rate,
+            v_packet: VecDeque::with_capacity(VIDEO_PACKET_SIZE),
+            v_frame: VecDeque::with_capacity(IMAGE_DATA_SIZE),
             packet_receiver,
-            sender,
+            data_sender,
+            time_receiver,
+            pause_receiver,
+            seek_receiver,
         }
     }
 
-    async fn send_frame(&mut self, frame: VideoFrame) {
-        if let Err(e) = self.sender.data.send(frame.into()).await {
-            debug!("{e:?}");
-        }
-    }
-
-    async fn video_frame(&mut self, mut video_frame: VideoFrame) {
-        let timestamp = video_frame.timestamp();
-        video_frame.set_pts(timestamp);
-
-        if video_frame.format() == Pixel::RGBA {
-            self.send_frame(video_frame).await;
-        } else {
-            if let Some(s) = &mut self.sws_context {
-                let mut out = VideoFrame::empty();
-                match s.run(&video_frame, &mut out) {
-                    Ok(_) => {
-                        self.send_frame(out).await;
-                    }
-                    Err(e) => {
-                        drop(out);
-                        debug!("{e:?}");
-                    }
-                }
-                drop(video_frame);
-            }
-        }
-    }
-
-    async fn packet(&mut self, packet: Packet) {
-        if let Err(e) = self.decoder.send_packet(&packet) {
-            debug!("send video packet: {e:?}");
-            return;
-        }
-        loop {
-            let mut decoded = VideoFrame::empty();
-            match self.decoder.receive_frame(&mut decoded) {
-                Ok(_) => {
-                    self.video_frame(decoded).await;
-                }
-                Err(e) => {
-                    drop(decoded);
-                    debug!("{e:?}");
-                    break;
-                }
+    fn video_frame(&mut self, frame: VideoFrame) {
+        if frame.format() == Pixel::RGBA {
+            self.v_frame.push_back(frame);
+        } else if let Some(s) = &mut self.sws_context {
+            let mut out = VideoFrame::empty();
+            if let Err(e) = s.run(&frame, &mut out) {
+                drop(out);
+                warn!("sws_context run: {e:?}");
+            } else {
+                out.set_pts(frame.pts().or(frame.timestamp()));
+                self.v_frame.push_back(out);
             }
         }
     }
 
     fn clear(&mut self) {
         self.decoder.flush();
-        let n = self.packet_receiver.len();
-        if n > 0 {
-            for _ in 0..n {
-                if let Ok(p) = self.packet_receiver.try_recv() {
-                    drop(p);
-                }
-            }
+        while let Ok(o) = self.packet_receiver.try_recv() {
+            drop(o);
         }
+        self.v_packet.clear();
+        self.v_frame.clear();
     }
 
-    fn end(self) {}
-
     async fn consume(mut self) {
+        let n = self.rate.denominator() as u64 * 1000000 / self.rate.numerator() as u64;
+        let mut interval = interval(Duration::from_micros(n));
+        let mut time = None;
+        let mut wait: u64 = 0;
+        let mut pause = false;
+        let mut send = false;
         loop {
             tokio::select! {
-                p = self.packet_receiver.recv() => {
-                    if let Some(packet) = p {
-                        self.packet(packet).await;
-                    } else {
-                        break;
+                biased;
+                r = self.time_receiver.recv() => {
+                    if let Some(o) = r {
+                        time.replace(o);
+                        info!("VideoConsumer time");
                     }
                 }
-                r = self.sender.ctrl.recv() => {
-                    match r {
-                        Ok(o) => {
-                            match o {
-                                ImageCtrl::Seek(_) => {
-                                    self.clear();
-                                }
-                                ImageCtrl::Pause(_) => {}
-                                ImageCtrl::Close => {
-                                    break;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            debug!("{e}");
-                        },
+                r = self.pause_receiver.recv() => {
+                    if let Ok(o) = r {
+                        pause = o;
+                        info!("VideoConsumer pause");
+                    }
+                }
+                r = self.seek_receiver.recv() => {
+                    if let Some(o) = r {
+                        self.clear();
+                        o.wait().await;
+                        info!("VideoConsumer seek");
+                    }
+                }
+                _ = interval.tick() => {
+                    if !pause {
+                        if wait > 0 {
+                            info!("VideoConsumer wait");
+                            wait = wait.saturating_sub(n);
+                        } else {
+                            send = true;
+                        }
+                    }
+                }
+                r = self.packet_receiver.recv(), if self.v_packet.len() < VIDEO_PACKET_SIZE => {
+                    if let Some(o) = r {
+                        self.v_packet.push_back(o);
                     }
                 }
             };
+            if send {
+                send = false;
+                trace!(
+                    "VideoConsumer vec: {} {}",
+                    self.v_packet.len(),
+                    self.v_frame.len()
+                );
+                while let Some(frame) = self.v_frame.pop_front() {
+                    if let Some(a) = time.take() {
+                        if let Some(pts) = frame.pts() {
+                            let b = self.stream.pts_to_micros(pts);
+                            info!("VideoConsumer sync {} {}", a, b);
+                            if b + 10000 < a {
+                                drop(frame);
+                                time.replace(a);
+                                continue;
+                            } else if a + 10000 < b {
+                                wait = (b - a) as u64;
+                                self.v_frame.push_front(frame);
+                                break;
+                            }
+                        }
+                    }
+                    if let Err(e) = self.data_sender.try_send(frame.into()) {
+                        if matches!(e, TrySendError::Closed(_)) {
+                            debug!("VideoConsumer Close");
+                            return;
+                        }
+                    }
+                    break;
+                }
+            }
+            if self.v_frame.len() < IMAGE_DATA_SIZE {
+                if let Some(packet) = self.v_packet.pop_front() {
+                    if let Err(e) = self.decoder.send_packet(&packet) {
+                        trace!("VideoConsumer send_packet: {e:?}");
+                    } else {
+                        loop {
+                            let mut frame = VideoFrame::empty();
+                            if let Err(e) = self.decoder.receive_frame(&mut frame) {
+                                drop(frame);
+                                trace!("VideoConsumer receive_frame: {e:?}");
+                                break;
+                            } else {
+                                self.video_frame(frame);
+                            }
+                        }
+                    }
+                }
+            }
         }
-        self.end();
     }
 }
 
 #[derive(Debug)]
 struct SoundData {
     bytes: AudioFrame,
+    i: usize,
 }
 
 impl SoundData {
     fn new(bytes: AudioFrame) -> Self {
-        Self { bytes }
+        Self { bytes, i: 0 }
     }
 
     fn bytes(&self) -> &[u8] {
-        self.bytes.data(0)
+        &self.bytes.data(0)[self.i..]
+    }
+
+    fn has_data(&mut self, n: usize) -> bool {
+        let n = self.i + n;
+        let r = n < self.bytes.data(0).len();
+        if r {
+            self.i = n;
+        }
+        r
     }
 }
 
@@ -318,45 +356,53 @@ impl From<AudioFrame> for SoundData {
 }
 
 #[derive(Debug)]
-struct SoundDataSender {
-    data: MpscSender<SoundData>,
-    ctrl: BroadcastReceiver<ImageCtrl>,
+struct SoundDataOutput {
+    stream: StreamData,
+    v_data: VecDeque<SoundData>,
+    data_receiver: MpscReceiver<SoundData>,
+    pause_receiver: BroadcastReceiver<bool>,
+    seek_receiver: MpscReceiver<Arc<Barrier>>,
+    close_receiver: MpscReceiver<Arc<Barrier>>,
 }
 
-#[derive(Debug)]
-struct SoundDataReceiver {
-    data: MpscReceiver<SoundData>,
-    ctrl: BroadcastReceiver<ImageCtrl>,
-}
-
-fn sound_build_channel(ctrl: BroadcastReceiver<ImageCtrl>) -> (SoundDataSender, SoundDataReceiver) {
-    let (sender, receiver) = mpsc_channel(SOUND_DATA_SIZE);
-    (
-        SoundDataSender {
-            data: sender,
-            ctrl: ctrl.resubscribe(),
-        },
-        SoundDataReceiver {
-            data: receiver,
-            ctrl,
-        },
-    )
+impl Drop for SoundDataOutput {
+    fn drop(&mut self) {
+        self.data_receiver.close();
+        info!("SoundDataOutput close");
+    }
 }
 
 struct AudioConsumer {
     decoder: Audio,
     swr_context: Option<SwrContext>,
+    v_packet: VecDeque<Packet>,
+    v_frame: VecDeque<AudioFrame>,
     packet_receiver: MpscReceiver<Packet>,
-    sender: SoundDataSender,
+    data_sender: MpscSender<SoundData>,
+    seek_receiver: MpscReceiver<Arc<Barrier>>,
+    seek_sender: MpscSender<Arc<Barrier>>,
 }
 
 impl AudioConsumer {
     fn new(
         decoder: Audio,
+        stream: StreamData,
         packet_receiver: MpscReceiver<Packet>,
-        ctrl: BroadcastReceiver<ImageCtrl>,
+        pause_receiver: BroadcastReceiver<bool>,
+        seek_receiver: MpscReceiver<Arc<Barrier>>,
+        close_receiver: MpscReceiver<Arc<Barrier>>,
     ) -> Self {
-        let (sender, receiver) = sound_build_channel(ctrl);
+        let (data_sender, data_receiver) = mpsc_channel(1);
+        let (seek_sender1, seek_receiver1) = mpsc_channel(CTRL_SIZE);
+
+        let output = SoundDataOutput {
+            stream,
+            v_data: VecDeque::with_capacity(SOUND_DATA_SIZE),
+            data_receiver,
+            pause_receiver,
+            seek_receiver: seek_receiver1,
+            close_receiver,
+        };
 
         let p = SoundProperty::new(&decoder);
 
@@ -370,7 +416,7 @@ impl AudioConsumer {
             #[cfg(target_os = "linux")]
             handle.block_on(async {
                 if let Some(mut sound) = linux::Sound::new(p) {
-                    sound.playback(receiver).await;
+                    sound.playback(output).await;
                 }
             });
 
@@ -386,105 +432,141 @@ impl AudioConsumer {
         Self {
             decoder,
             swr_context,
+            v_packet: VecDeque::with_capacity(AUDIO_PACKET_SIZE),
+            v_frame: VecDeque::with_capacity(SOUND_DATA_SIZE),
             packet_receiver,
-            sender,
+            data_sender,
+            seek_receiver,
+            seek_sender: seek_sender1,
         }
     }
 
-    async fn send_frame(&mut self, frame: AudioFrame) {
-        if let Err(e) = self.sender.data.send(frame.into()).await {
-            debug!("{e:?}");
-        }
-    }
-
-    async fn audio_frame(&mut self, audio_frame: AudioFrame) {
-        if audio_frame.is_planar() {
+    fn audio_frame(&mut self, frame: AudioFrame) {
+        if frame.is_planar() {
             if let Some(s) = &mut self.swr_context {
                 let mut out = AudioFrame::empty();
-                match s.run(&audio_frame, &mut out) {
+                match s.run(&frame, &mut out) {
                     Ok(_) => {
-                        self.send_frame(out).await;
+                        out.set_pts(frame.pts().or(frame.timestamp()));
+                        self.v_frame.push_back(out);
                     }
                     Err(e) => {
                         drop(out);
-                        debug!("{e:?}");
+                        warn!("swr_context run: {e:?}");
                     }
                 }
-                drop(audio_frame);
             }
         } else {
-            self.send_frame(audio_frame).await;
-        }
-    }
-
-    async fn packet(&mut self, packet: Packet) {
-        if let Err(e) = self.decoder.send_packet(&packet) {
-            debug!("send audio packet: {e:?}");
-            return;
-        }
-        loop {
-            let mut decoded = AudioFrame::empty();
-            match self.decoder.receive_frame(&mut decoded) {
-                Ok(_) => {
-                    self.audio_frame(decoded).await;
-                }
-                Err(e) => {
-                    drop(decoded);
-                    debug!("{e:?}");
-                    break;
-                }
-            }
+            self.v_frame.push_back(frame);
         }
     }
 
     fn clear(&mut self) {
         self.decoder.flush();
-        let n = self.packet_receiver.len();
-        if n > 0 {
-            for _ in 0..n {
-                if let Ok(p) = self.packet_receiver.try_recv() {
-                    drop(p);
+        while let Ok(o) = self.packet_receiver.try_recv() {
+            drop(o);
+        }
+        self.v_packet.clear();
+        self.v_frame.clear();
+    }
+
+    async fn consume(mut self) {
+        let mut interval = interval_millis();
+        loop {
+            tokio::select! {
+                biased;
+                r = self.seek_receiver.recv() => {
+                    if let Some(o) = r {
+                        self.clear();
+                        let o2 = Arc::new(Barrier::new(2));
+                        if let Err(e) = self.seek_sender.send(o2.clone()).await{
+                            drop(e);
+                        }
+                        o2.wait().await;
+                        o.wait().await;
+                        info!("AudioConsumer seek");
+                    }
+                }
+                _ = interval.tick() => {
+                    trace!("AudioConsumer vec: {} {}", self.v_packet.len(), self.v_frame.len());
+                }
+                p = self.packet_receiver.recv(), if self.v_packet.len() < AUDIO_PACKET_SIZE => {
+                    if let Some(packet) = p {
+                        self.v_packet.push_back(packet);
+                    }
+                }
+            };
+            if self.v_frame.len() > 0 {
+                loop {
+                    match self.data_sender.try_reserve() {
+                        Ok(o) => {
+                            if let Some(frame) = self.v_frame.pop_front() {
+                                o.send(frame.into());
+                            } else {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            if matches!(e, TrySendError::Closed(_)) {
+                                debug!("AudioConsumer Close");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            if self.v_frame.len() < SOUND_DATA_SIZE {
+                if let Some(packet) = self.v_packet.pop_front() {
+                    if let Err(e) = self.decoder.send_packet(&packet) {
+                        trace!("AudioConsumer send_packet: {e:?}");
+                    } else {
+                        loop {
+                            let mut frame = AudioFrame::empty();
+                            if let Err(e) = self.decoder.receive_frame(&mut frame) {
+                                drop(frame);
+                                trace!("AudioConsumer receive_frame: {e:?}");
+                                break;
+                            } else {
+                                self.audio_frame(frame);
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
 
-    fn end(self) {
-        drop(self.sender);
-        drop(self.packet_receiver);
+#[derive(Clone, Debug)]
+struct StreamData {
+    index: usize,
+    time_base: Rational,
+    start: i64,
+    duration: i64,
+}
+
+impl StreamData {
+    fn index(&self) -> i32 {
+        self.index as i32
     }
 
-    async fn consume(mut self) {
-        loop {
-            tokio::select! {
-                p = self.packet_receiver.recv() => {
-                    if let Some(packet) = p {
-                        self.packet(packet).await;
-                    } else {
-                        break;
-                    }
-                }
-                r = self.sender.ctrl.recv() => {
-                    match r {
-                        Ok(o) => {
-                            match o {
-                                ImageCtrl::Seek(_) => {
-                                    self.clear();
-                                }
-                                ImageCtrl::Pause(_) => {}
-                                ImageCtrl::Close => {
-                                    break;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            debug!("{e}");
-                        },
-                    }
-                }
-            };
+    fn pts_to_micros(&self, pts: i64) -> i64 {
+        (pts - self.start).rescale(self.time_base, Rational::new(1, 1000000))
+    }
+
+    fn seek_pts(&self, a: i64, b: i64) -> i64 {
+        self.duration * a / b + self.start
+    }
+}
+
+impl From<(usize, Rational, i64, i64)> for StreamData {
+    fn from(o: (usize, Rational, i64, i64)) -> Self {
+        Self {
+            index: o.0,
+            time_base: o.1,
+            start: o.2,
+            duration: o.3,
         }
-        self.end();
     }
 }
 
@@ -492,6 +574,8 @@ impl AudioConsumer {
 struct MediaWrapper {
     input: Input,
     map: HashMap<usize, MpscSender<Packet>>,
+    video_stream: Option<StreamData>,
+    audio_stream: Option<StreamData>,
 }
 
 impl MediaWrapper {
@@ -501,113 +585,242 @@ impl MediaWrapper {
             .map(|input| Self {
                 input,
                 map: HashMap::new(),
+                video_stream: None,
+                audio_stream: None,
             })
     }
 
-    async fn decode(&mut self, sender: ImageDataSender) {
-        let mut ctrl = sender.ctrl.resubscribe();
-        let mut sender = Some(sender);
-        for stream in self.input.streams() {
-            let stream_index = stream.index();
-            match Context::from_parameters(stream.parameters()) {
-                Ok(context) => {
-                    let decoder = context.decoder();
-                    match decoder.medium() {
-                        MediaType::Video => match decoder.video() {
-                            Ok(video_decoder) => {
-                                debug!("video_stream_index: {stream_index}");
-                                if let Some(sender) = sender.take() {
-                                    let (p_sender, p_receiver) = mpsc_channel(VIDEO_PACKET_SIZE);
-                                    self.map.insert(stream_index, p_sender);
-                                    let handle = Handle::current();
-                                    std::thread::spawn(move || {
-                                        handle.block_on(async {
-                                            let o = VideoConsumer::new(
-                                                video_decoder,
-                                                p_receiver,
-                                                sender,
-                                            );
-                                            o.consume().await;
-                                        });
-                                    });
-                                } else {
-                                    warn!("other video stream");
+    async fn decode(&mut self, sender: MpscSender<ImageDataOutput>, is_output: bool) {
+        let duration = self.input.duration();
+        let streams = self.input.streams();
+
+        let mut time_sender_holder = None;
+        let (pause_sender, pause_receiver) = broadcast_channel(CTRL_SIZE);
+        let (seek_sender, mut seek_receiver) = mpsc_channel(CTRL_SIZE);
+        let mut seek_sender_holder = Vec::with_capacity(3);
+        let (close_sender, mut close_receiver) = mpsc_channel(CTRL_SIZE);
+        let mut close_sender_holder = None;
+
+        if is_output && let Some(s) = streams.best(MediaType::Video) {
+            match Context::from_parameters(s.parameters())
+                .map(|context| context.decoder().video())
+                .flatten()
+            {
+                Ok(decoder) => {
+                    let index = s.index();
+                    let time_base = s.time_base();
+                    let o = (
+                        index,
+                        time_base,
+                        s.start_time(),
+                        duration.rescale(TIME_BASE, time_base),
+                    );
+                    info!("video stream: {:?}", o);
+                    self.video_stream.replace(o.into());
+
+                    let (packet_sender, packet_receiver) = mpsc_channel(1);
+                    self.map.insert(index, packet_sender);
+
+                    let rate = s.avg_frame_rate();
+                    let (data_sender, data_receiver) = mpsc_channel(1);
+                    let (time_sender, time_receiver) = mpsc_channel(CTRL_SIZE);
+                    time_sender_holder.replace(time_sender);
+                    let pause_receiver = pause_receiver.resubscribe();
+                    let (seek_sender1, seek_receiver1) = mpsc_channel(CTRL_SIZE);
+                    seek_sender_holder.push(seek_sender1);
+                    let handle = Handle::current();
+                    std::thread::spawn(move || {
+                        handle.block_on(async {
+                            VideoConsumer::new(
+                                decoder,
+                                o.into(),
+                                rate,
+                                packet_receiver,
+                                data_sender,
+                                time_receiver,
+                                pause_receiver,
+                                seek_receiver1,
+                            )
+                            .consume()
+                            .await;
+                        });
+                    });
+
+                    let o = ImageDataOutput::new(
+                        Some(data_receiver),
+                        pause_sender,
+                        seek_sender,
+                        close_sender,
+                    );
+                    let _ = sender.send(o).await;
+                }
+                Err(e) => {
+                    error!("video stream: {e:?}");
+                }
+            }
+        } else {
+            let o = ImageDataOutput::new(None, pause_sender, seek_sender, close_sender);
+            let _ = sender.send(o).await;
+        }
+
+        if let Some(s) = streams.best(MediaType::Audio) {
+            match Context::from_parameters(s.parameters())
+                .map(|context| context.decoder().audio())
+                .flatten()
+            {
+                Ok(decoder) => {
+                    let index = s.index();
+                    let time_base = s.time_base();
+                    let o = (
+                        index,
+                        time_base,
+                        s.start_time(),
+                        duration.rescale(TIME_BASE, time_base),
+                    );
+                    info!("audio stream: {:?}", o);
+                    self.audio_stream.replace(o.into());
+
+                    let (packet_sender, packet_receiver) = mpsc_channel(1);
+                    self.map.insert(index, packet_sender);
+
+                    let (seek_sender1, seek_receiver1) = mpsc_channel(CTRL_SIZE);
+                    seek_sender_holder.push(seek_sender1);
+                    let (close_sender, close_receiver) = mpsc_channel(1);
+                    close_sender_holder.replace(close_sender);
+                    let handle = Handle::current();
+                    std::thread::spawn(move || {
+                        handle.block_on(async {
+                            AudioConsumer::new(
+                                decoder,
+                                o.into(),
+                                packet_receiver,
+                                pause_receiver,
+                                seek_receiver1,
+                                close_receiver,
+                            )
+                            .consume()
+                            .await;
+                        });
+                    });
+                }
+                Err(e) => {
+                    error!("audio stream: {e:?}");
+                }
+            }
+        } else {
+            drop(pause_receiver);
+        }
+
+        info!("start packet");
+        let mut packet_holder: Option<Packet> = None;
+        let mut seek = None;
+        let mut time = false;
+        let mut close = false;
+        loop {
+            if let Ok(n) = seek_receiver.try_recv() {
+                seek.replace(n);
+            }
+            if let Some((a, b)) = seek.take() {
+                if let Some(o) = self.video_stream.as_ref().or(self.audio_stream.as_ref()) {
+                    let i = o.index();
+                    let t = o.seek_pts(a as i64, b as i64);
+                    unsafe {
+                        let p = self.input.as_mut_ptr();
+                        let f = AVSEEK_FLAG_BACKWARD;
+                        let r = avformat_seek_file(p, i, 0, t, i64::MAX, f);
+                        if r < 0 {
+                            warn!("MediaWrapper seek: {:?}", ffmpeg_next::Error::from(r));
+                            continue;
+                        }
+                    }
+                    info!("MediaWrapper seek");
+                    let barrier = Arc::new(Barrier::new(seek_sender_holder.len() + 1));
+                    for sender in &seek_sender_holder {
+                        if let Err(e) = sender.send(barrier.clone()).await {
+                            drop(e);
+                        }
+                        time = true;
+                    }
+                    barrier.wait().await;
+                }
+            }
+            if let Ok(_) = close_receiver.try_recv() {
+                close = true;
+            }
+            if close {
+                if let Some(sender) = &close_sender_holder {
+                    let barrier = Arc::new(Barrier::new(2));
+                    if let Err(e) = sender.send(barrier.clone()).await {
+                        drop(e);
+                    }
+                    barrier.wait().await;
+                }
+                info!("MediaWrapper close");
+                return;
+            }
+            if let Some(packet) = packet_holder.take() {
+                if let Some(packet_sender) = self.map.get_mut(&packet.stream()) {
+                    if let Ok(o) = packet_sender.try_reserve() {
+                        o.send(packet);
+                        continue;
+                    }
+                }
+                packet_holder.replace(packet);
+                continue;
+            }
+            let mut packet = Packet::empty();
+            if let Err(e) = packet.read(&mut self.input) {
+                if matches!(e, ffmpeg_next::Error::Eof) {
+                    debug!("MediaWrapper packet read eof");
+                    tokio::select! {
+                        r = seek_receiver.recv() => {
+                            if let Some(n) =r {
+                                seek.replace(n);
+                            }
+                        }
+                        r = close_receiver.recv() => {
+                            if let Some(_) = r {
+                                close = true;
+                            }
+                        }
+                    };
+                    continue;
+                } else {
+                    debug!("MediaWrapper packet read: {e:?}");
+                }
+            } else {
+                if time {
+                    if let Some(s) = &self.audio_stream {
+                        if s.index == packet.stream() {
+                            time = false;
+                            if let Some(time_sender) = &time_sender_holder {
+                                if let Some(n) = packet.pts() {
+                                    let _ = time_sender.try_send(s.pts_to_micros(n));
                                 }
                             }
-                            Err(e) => {
-                                error!("video: {e:?}");
-                            }
-                        },
-                        MediaType::Audio => match decoder.audio() {
-                            Ok(audio_decoder) => {
-                                debug!("audio_stream_index: {stream_index}");
-                                let (p_sender, p_receiver) = mpsc_channel(AUDIO_PACKET_SIZE);
-                                self.map.insert(stream_index, p_sender);
-                                let ctrl = ctrl.resubscribe();
-                                tokio::spawn(async move {
-                                    let o = AudioConsumer::new(audio_decoder, p_receiver, ctrl);
-                                    o.consume().await;
-                                });
-                            }
-                            Err(e) => {
-                                error!("audio: {e:?}");
-                            }
-                        },
-                        _ => {
-                            trace!("other_stream_index: {stream_index}");
                         }
                     }
                 }
-                Err(e) => {
-                    warn!("from_parameters: {e:?}");
-                }
-            };
-        }
-
-        let f = unsafe { self.input.as_mut_ptr() };
-
-        info!("start packet");
-        for (stream, packet) in self.input.packets() {
-            let stream_index = stream.index();
-            if let Some(packet_sender) = self.map.get_mut(&stream_index) {
-                if let Err(e) = packet_sender.send(packet).await {
-                    debug!("{e:?}");
-                }
-            }
-            if let Ok(o) = ctrl.try_recv() {
-                match o {
-                    ImageCtrl::Seek(n) => {
-                        seek(f, &stream, n as i32);
-                    }
-                    ImageCtrl::Pause(_) => {}
-                    ImageCtrl::Close => {
-                        break;
+                if let Some(packet_sender) = self.map.get_mut(&packet.stream()) {
+                    if let Ok(o) = packet_sender.try_reserve() {
+                        o.send(packet);
+                    } else {
+                        packet_holder.replace(packet);
                     }
                 }
             }
         }
-
-        for (stream_index, _) in self.map.drain() {
-            trace!("stream_index: {stream_index} end");
-        }
     }
 }
 
-fn seek(f: *mut AVFormatContext, stream: &Stream, pos: i32) {
-    let tar = (pos * AV_TIME_BASE).rescale(TIME_BASE, stream.time_base());
-    unsafe {
-        av_seek_frame(f, stream.index() as i32, tar, AVSEEK_FLAG_BACKWARD);
-    }
-}
-
-pub(crate) fn build(s: String) -> ImageDataReceiver {
-    let (sender, receiver) = image_build_channel();
+pub(crate) fn build(s: String, is_output: bool) -> MpscReceiver<ImageDataOutput> {
+    let (sender, receiver) = mpsc_channel(1);
     std::thread::spawn(move || {
         if let Err(e) = Runtime::new().map(|rt| {
             rt.block_on(async {
                 match MediaWrapper::new(&s) {
                     Ok(mut w) => {
-                        w.decode(sender).await;
+                        w.decode(sender, is_output).await;
                     }
                     Err(e) => {
                         error!("media: {e}");
