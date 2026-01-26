@@ -149,7 +149,6 @@ impl Inp {
                     t.context.set_input_to(self.element.clone());
                     self.draw_text.set_cursor(true);
                     t.finish = true;
-                    t.callback.push(Box::new(self.callback_action()));
                     return;
                 } else {
                     t.context.take_input_to();
