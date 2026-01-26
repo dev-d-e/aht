@@ -186,10 +186,11 @@ impl PageContext {
                 }
                 return None;
             }
-            ActionKind::DeleteFront(_, mut n) => {
+            ActionKind::DeleteFront(_, n) => {
                 if let Some(o) = &mut self.input_to {
                     if let Ok(mut e) = o.try_write() {
                         if let Some(a) = e.attribute_mut().value_or_insert() {
+                            let mut n = *n;
                             while n > 0 {
                                 a.pop();
                                 n -= 1;
@@ -199,10 +200,11 @@ impl PageContext {
                 }
                 return None;
             }
-            ActionKind::DeleteBack(_, mut n) => {
+            ActionKind::DeleteBack(_, n) => {
                 if let Some(o) = &mut self.input_to {
                     if let Ok(mut e) = o.try_write() {
                         if let Some(a) = e.attribute_mut().value_or_insert() {
+                            let mut n = *n;
                             while n > 0 {
                                 a.pop();
                                 n -= 1;
