@@ -260,7 +260,7 @@ pub struct VkRenderer {
     render_pass: Arc<RenderPass>,
     acquire_future: Option<Box<dyn GpuFuture>>,
     framebuffers: Vec<Arc<Framebuffer>>,
-    skia_context: DirectContext,
+    skia_context: Option<DirectContext>,
     width: u32,
     height: u32,
     reflesh: bool,
@@ -276,7 +276,10 @@ impl TryFrom<SurfaceQueueHolder> for VkRenderer {
 
 impl Drop for VkRenderer {
     fn drop(&mut self) {
-        self.skia_context.free_gpu_resources();
+        if let Some(mut skia_context) = self.skia_context.take() {
+            skia_context.free_gpu_resources();
+            drop(skia_context);
+        }
     }
 }
 
@@ -310,7 +313,7 @@ impl VkRenderer {
                 render_pass,
                 acquire_future: Some(now(device).boxed()),
                 framebuffers: Vec::new(),
-                skia_context,
+                skia_context: Some(skia_context),
                 width: 100,
                 height: 100,
                 reflesh: true,
@@ -325,13 +328,6 @@ impl VkRenderer {
     }
 
     fn reflesh(&mut self) -> bool {
-        if let Some(acquire_future) = self.acquire_future.as_mut() {
-            acquire_future.cleanup_finished();
-        }
-
-        if !self.reflesh {
-            return true;
-        }
         if self.width == 0 || self.height == 0 {
             return false;
         }
@@ -370,37 +366,35 @@ impl VkRenderer {
     where
         F: FnOnce(skia_safe::Surface),
     {
+        if let Some(acquire_future) = self.acquire_future.as_mut() {
+            acquire_future.cleanup_finished();
+        }
+
         if self.reflesh {
             if !self.reflesh() {
                 return;
             }
         }
         let (image_index, suboptimal, acquire_future) =
-            match acquire_next_image(self.swapchain.clone(), None) {
-                Ok(o) => o,
-                Err(e) => {
-                    warn!("{e}");
-                    return;
-                }
-            };
+            result_return!(
+                acquire_next_image(self.swapchain.clone(), None).map_err(|e| warn!("{e:?}"))
+            );
 
         if suboptimal {
             self.reflesh = true;
         }
 
-        let mut surface = match build_surface(
-            &mut self.skia_context,
-            &self.framebuffers[image_index as usize],
-        ) {
-            Some(o) => o,
-            None => return,
-        };
+        let skia_context = option_return!(&mut self.skia_context);
+        let mut surface = option_return!(build_surface(
+            skia_context,
+            &self.framebuffers[image_index as usize]
+        ));
 
         let canvas = surface.canvas();
         canvas.reset_matrix();
         f(surface);
 
-        self.skia_context.flush_and_submit();
+        skia_context.flush_and_submit();
 
         self.acquire_future = self
             .acquire_future
