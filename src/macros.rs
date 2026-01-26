@@ -92,3 +92,37 @@ macro_rules! deref {
         }
     };
 }
+
+macro_rules! option_return {
+    ($a:expr) => {
+        if let Some(o) = $a {
+            o
+        } else {
+            return;
+        }
+    };
+    ($a:expr, $r:expr) => {
+        if let Some(o) = $a {
+            o
+        } else {
+            return $r;
+        }
+    };
+}
+
+macro_rules! result_return {
+    ($a:expr) => {
+        if let Ok(o) = $a {
+            o
+        } else {
+            return;
+        }
+    };
+    ($a:expr, $r:expr) => {
+        if let Ok(o) = $a {
+            o
+        } else {
+            return $r;
+        }
+    };
+}
