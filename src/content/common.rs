@@ -8,6 +8,7 @@ use skia_safe::{EncodedImageFormat, Font, IRect, Image, Rect, SamplingOptions};
 use std::io::Read;
 use std::ops::Add;
 use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 
 #[derive(Clone, Default, Getters, MutGetters, Setters)]
 #[getset(set = "pub(crate)")]
@@ -640,64 +641,54 @@ fn get_decoder(f: EncodedImageFormat) -> Option<Decoder> {
 }
 
 #[derive(Debug)]
-pub(super) struct VideoReader {
-    result: ImageDataReceiver,
+pub(super) struct MediaReader {
+    result: Option<ImageDataOutput>,
+    receiver: Receiver<ImageDataOutput>,
 }
 
-impl VideoReader {
-    pub(super) fn new(s: &str) -> Self {
-        let receiver = build(s.to_string());
-        Self { result: receiver }
-    }
-
-    pub(super) fn time(&mut self, n: f32) {
-        self.result.ctrl_seek(n);
+impl MediaReader {
+    pub(super) fn new(s: &str, is_output: bool) -> Self {
+        let receiver = build(s.to_string(), is_output);
+        Self {
+            result: None,
+            receiver,
+        }
     }
 
     pub(super) fn pause(&mut self, o: bool) {
-        self.result.ctrl_pause(o);
+        if let Some(r) = &mut self.result {
+            r.pause(o);
+        }
+    }
+
+    pub(super) fn seek(&mut self, n: (u32, u32)) {
+        if let Some(r) = &mut self.result {
+            r.seek(n);
+        }
     }
 
     pub(super) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        let info = t.surface.canvas().image_info();
-        if let Some(i) = self.result.data(info, rect.side()) {
-            t.surface.canvas().draw_image(i, &***rect, None);
+        if let Some(r) = &mut self.result {
+            let info = t.surface.canvas().image_info();
+            if let Some(i) = r.data(info, rect.side()) {
+                t.surface.canvas().draw_image(i, &***rect, None);
+            }
+        } else if let Ok(a) = self.receiver.try_recv() {
+            self.result.replace(a);
+        }
+    }
+
+    pub(super) fn no_draw(&mut self) {
+        if self.result.is_none() {
+            if let Ok(a) = self.receiver.try_recv() {
+                self.result.replace(a);
+            }
         }
     }
 }
 
-impl Drop for VideoReader {
-    fn drop(&mut self) {
-        self.result.ctrl_close();
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct AudioReader {
-    result: ImageDataReceiver,
-}
-
-impl AudioReader {
-    pub(super) fn new(s: &str) -> Self {
-        let receiver = build(s.to_string());
-        Self { result: receiver }
-    }
-
-    pub(super) fn time(&mut self, n: f32) {
-        self.result.ctrl_seek(n);
-    }
-
-    pub(super) fn pause(&mut self, o: bool) {
-        self.result.ctrl_pause(o);
-    }
-
-    pub(super) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        self.result.none();
-    }
-}
-
-impl Drop for AudioReader {
-    fn drop(&mut self) {
-        self.result.ctrl_close();
+impl From<(&String, bool)> for MediaReader {
+    fn from(o: (&String, bool)) -> Self {
+        Self::new(o.0, o.1)
     }
 }
