@@ -163,14 +163,14 @@ impl Chronograph {
 
 #[derive(Debug)]
 pub(crate) struct FpsCtrl {
-    target: f32,
+    target: (u32, u32),
     duration: Duration,
     t: Instant,
 }
 
 impl FpsCtrl {
-    pub(crate) fn new(target: f32) -> Self {
-        let duration = Duration::from_secs_f32(1.0 / target);
+    pub(crate) fn new(target: (u32, u32)) -> Self {
+        let duration = Duration::from_micros(target.1 as u64 * 1000000 / target.0 as u64);
         Self {
             target,
             duration,
@@ -194,11 +194,17 @@ impl FpsCtrl {
     }
 }
 
+impl From<(u32, u32)> for FpsCtrl {
+    fn from(o: (u32, u32)) -> Self {
+        Self::new(o)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct FpsCounter {
-    n: u32,
+    n: u64,
     t: Instant,
-    r: f32,
+    r: u64,
 }
 
 impl Default for FpsCounter {
@@ -206,7 +212,7 @@ impl Default for FpsCounter {
         Self {
             n: 0,
             t: Instant::now(),
-            r: 0.0,
+            r: 0,
         }
     }
 }
@@ -219,18 +225,14 @@ impl FpsCounter {
 
     pub(crate) fn count(&mut self) {
         self.n += 1;
-        let o = self.t.elapsed().as_secs_f32();
-        if o >= 1.0 {
-            self.r = self.n as f32 / o;
+        let o = self.t.elapsed().as_millis() as u64;
+        if o >= 1000 {
+            self.r = self.n * 1000 / o;
             self.reset();
         }
     }
 
-    pub(crate) fn fps(&mut self) -> Option<f32> {
-        if self.r > 0.0 {
-            Some(self.r)
-        } else {
-            None
-        }
+    pub(crate) fn fps(&self) -> Option<u64> {
+        if self.r > 0 { Some(self.r) } else { None }
     }
 }
