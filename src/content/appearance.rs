@@ -243,6 +243,12 @@ impl std::fmt::Debug for AppearanceComposite {
     }
 }
 
+impl From<Vec<Appearance>> for AppearanceComposite {
+    fn from(o: Vec<Appearance>) -> Self {
+        Self::new(o)
+    }
+}
+
 macro_rules! appearance_composite {
     ($t:ty, $o:tt) => {
         impl From<$t> for AppearanceComposite {
@@ -269,7 +275,8 @@ impl AppearanceComposite {
     }
 
     pub(crate) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
-        for o in &mut self.buffer {
+        let mut i = self.buffer.iter_mut();
+        while let Some(o) = i.next_back() {
             o.draw(rect, t);
         }
     }
