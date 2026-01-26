@@ -10,7 +10,7 @@ pub(crate) struct Audio {
     rect: FixedRect,
     painter: AppearanceComposite,
     align_pattern: AlignPattern,
-    reader: Option<AudioReader>,
+    reader: Option<MediaReader>,
     control: PlayPart,
 }
 
@@ -59,11 +59,11 @@ impl Audio {
 
         if self.reader.is_none() {
             if let Ok(e) = self.element.read() {
-                self.reader.replace(AudioReader::new(e.text()));
+                self.reader.replace((e.text(), false).into());
             }
         }
         if let Some(o) = &mut self.reader {
-            o.draw(&self.rect, t);
+            o.no_draw();
         }
 
         self.control.draw(t);
@@ -201,7 +201,7 @@ pub(crate) struct Video {
     rect: FixedRect,
     painter: AppearanceComposite,
     align_pattern: AlignPattern,
-    reader: Option<VideoReader>,
+    reader: Option<MediaReader>,
     control: PlayPart,
 }
 
@@ -224,7 +224,7 @@ impl Video {
             element,
             rect: (100.0, 100.0).into(),
             painter: Rectangle {
-                color: *default_surface_color(),
+                color: Color::from_rgb(0, 0, 0),
             }
             .into(),
             align_pattern: AlignPattern::center_middle(),
@@ -245,15 +245,16 @@ impl Video {
     pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
         draw_check!(self);
 
+        self.painter.draw(&self.rect, t);
+
         if self.reader.is_none() {
             if let Ok(e) = self.element.read() {
-                self.reader.replace(VideoReader::new(e.text()));
+                self.reader.replace((e.text(), true).into());
             }
         }
+
         if let Some(o) = &mut self.reader {
             o.draw(&self.rect, t);
-        } else {
-            self.painter.draw(&self.rect, t);
         }
 
         self.control.draw(t);
@@ -345,8 +346,11 @@ impl PlayPart {
         self.time = (self.time + n).min(self.rate_0.side().width()).max(0.0);
     }
 
-    fn rate(&mut self) -> f32 {
-        self.time / self.rate_0.side().width()
+    fn rate(&self) -> (u32, u32) {
+        (
+            (self.time * 1000.0) as u32,
+            (self.rate_0.side().width() * 1000.0) as u32,
+        )
     }
 
     fn draw(&mut self, t: &mut DrawCtx) {
