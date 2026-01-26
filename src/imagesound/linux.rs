@@ -1,6 +1,6 @@
 use super::*;
 use alsa::pcm::{Access as AlsaAccess, Format as AlsaFormat, HwParams, State};
-use alsa::{Direction, ValueOr, PCM};
+use alsa::{Direction, PCM, ValueOr};
 
 fn sample_to_format(sample: Sample) -> AlsaFormat {
     match sample {
@@ -39,44 +39,68 @@ impl Sound {
             .ok()
     }
 
-    pub(super) async fn playback(&mut self, mut receiver: SoundDataReceiver) {
+    pub(super) async fn playback(&mut self, mut s: SoundDataOutput) {
+        let _ = self.pcm.prepare();
         let io = self.pcm.io_bytes();
+        let mut interval = interval_millis();
+        let mut pause = false;
         loop {
             tokio::select! {
-                o = receiver.data.recv() => {
-                    if let Some(buf) = o {
-                        if let Err(e) = io.writei(buf.bytes()) {
-                            debug!("{e}");
-                        }
-                        drop(buf);
-                    } else {
-                        break;
+                biased;
+                r = s.pause_receiver.recv() => {
+                    if let Ok(o) = r {
+                        pause = o;
+                        let _ = self.pcm.pause(o);
+                        info!("Sound pause");
                     }
                 }
-                r = receiver.ctrl.recv() => {
-                    match r {
-                        Ok(o) => {
-                            match o{
-                                ImageCtrl::Seek(_)  => {},
-                                ImageCtrl::Pause(o) => {
-                                    let _ = self.pcm.pause(o);
-                                },
-                                ImageCtrl::Close => {
-                                    let _ = self.pcm.drain();
-                                    return ;
-                                },
-                            }
-                        },
-                        Err(e) => {
-                            debug!("{e}");
-                        },
+                r = s.seek_receiver.recv() => {
+                    if let Some(o) = r {
+                        let _ = self.pcm.drop();
+                        let _ = self.pcm.prepare();
+                        while let Ok(buf) = s.data_receiver.try_recv(){
+                            drop(buf);
+                        }
+                        s.v_data.clear();
+                        o.wait().await;
+                        info!("Sound seek");
+                    }
+                }
+                r = s.close_receiver.recv() => {
+                    if let Some(o) = r {
+                        let _ = self.pcm.drop();
+                        o.wait().await;
+                        info!("Sound close");
+                        return;
+                    }
+                }
+                _ = interval.tick() => {}
+                r = s.data_receiver.recv(), if s.v_data.len() < SOUND_DATA_SIZE => {
+                    if let Some(buf) = r {
+                        s.v_data.push_back(buf);
                     }
                 }
             }
+            if !pause {
+                if let Some(mut buf) = s.v_data.pop_front() {
+                    match io.writei(buf.bytes()) {
+                        Ok(n) => {
+                            let n = self.pcm.frames_to_bytes(n as i64) as usize;
+                            if buf.has_data(n) {
+                                s.v_data.push_front(buf);
+                            } else {
+                                drop(buf);
+                            }
+                        }
+                        Err(e) => {
+                            let _ = self.pcm.try_recover(e, false);
+                        }
+                    }
+                }
+                if self.pcm.state() != State::Running {
+                    let _ = self.pcm.start();
+                }
+            }
         }
-        if self.pcm.state() != State::Running {
-            let _ = self.pcm.start();
-        };
-        let _ = self.pcm.drain();
     }
 }
