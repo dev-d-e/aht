@@ -3,12 +3,12 @@ use getset::{Getters, MutGetters, Setters};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
-use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
-const WINDOW_FPS: f32 = 60.0;
+const WINDOW_FPS: (u32, u32) = (60, 1);
 
 ///A builder for an application.
 pub struct ScreenBuilder {}
@@ -53,7 +53,7 @@ impl WindowContext {
             page,
             r: None,
             attributes,
-            fps_ctrl: FpsCtrl::new(WINDOW_FPS),
+            fps_ctrl: WINDOW_FPS.into(),
             fps_counter: Default::default(),
             event_wrapper: Default::default(),
         }
@@ -76,8 +76,8 @@ impl ApplicationHandler for WindowContext {
         };
         match event {
             WindowEvent::CloseRequested => {
-                self.r.take();
                 event_loop.exit();
+                return;
             }
             WindowEvent::CursorEntered { .. } => {
                 self.page.receive_action(ActionKind::CursorEntered);
@@ -161,14 +161,6 @@ impl ApplicationHandler for WindowContext {
         }
     }
 
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        let _ = (event_loop, cause);
-    }
-
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ()) {
-        let _ = (event_loop, event);
-    }
-
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some((_, window)) = self.r.as_mut() {
             if let Some(o) = self.fps_ctrl.need_to_wait() {
@@ -177,18 +169,6 @@ impl ApplicationHandler for WindowContext {
                 window.request_redraw();
             }
         }
-    }
-
-    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
-        self.r.take();
-    }
-
-    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        let _ = event_loop;
-    }
-
-    fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
-        let _ = event_loop;
     }
 }
 
