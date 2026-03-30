@@ -1,4 +1,5 @@
 use crate::error::*;
+pub(crate) use getset::{CopyGetters, Getters, MutGetters, Setters};
 pub(crate) use log::{debug, error, info, trace, warn};
 use std::str::FromStr;
 use std::time::{Duration, Instant};
