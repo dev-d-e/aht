@@ -2,8 +2,7 @@ use super::*;
 use crate::error::*;
 use crate::utils::ascii::*;
 use crate::utils::*;
-use getset::{CopyGetters, Setters};
-use skia_safe::{scalar, ISize, Point, Size};
+use skia_safe::{ISize, Point, Size, scalar};
 use std::ops::Add;
 use std::str::FromStr;
 
@@ -530,10 +529,10 @@ impl RectSide {
     }
 
     pub(crate) fn get_attr(&mut self, e: &Element, r: &Self) {
-        if let Some(a) = e.attribute().width() {
+        if let Some(a) = e.width() {
             self.width = a.get(r.width);
         }
-        if let Some(a) = e.attribute().height() {
+        if let Some(a) = e.height() {
             self.height = a.get(r.height);
         }
     }
