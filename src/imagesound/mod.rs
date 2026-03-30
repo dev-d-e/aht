@@ -100,8 +100,10 @@ impl From<VideoFrame> for ImageData {
     }
 }
 
-#[derive(Debug)]
+#[derive(CopyGetters, Debug)]
 pub(crate) struct ImageDataOutput {
+    #[getset(get_copy = "pub(crate)")]
+    duration: i64,
     buffer: Option<Image>,
     data_receiver: Option<MpscReceiver<ImageData>>,
     pause_sender: BroadcastSender<bool>,
@@ -111,12 +113,14 @@ pub(crate) struct ImageDataOutput {
 
 impl ImageDataOutput {
     fn new(
+        duration: i64,
         data_receiver: Option<MpscReceiver<ImageData>>,
         pause_sender: BroadcastSender<bool>,
         seek_sender: MpscSender<(u32, u32)>,
         close_sender: MpscSender<()>,
     ) -> Self {
         Self {
+            duration,
             buffer: None,
             data_receiver,
             pause_sender,
@@ -125,15 +129,17 @@ impl ImageDataOutput {
         }
     }
 
+    fn try_recv(&mut self, image_info: ImageInfo, r: &RectSide) -> Option<()> {
+        let receiver = self.data_receiver.as_mut()?;
+        let data = receiver.try_recv().ok()?;
+        let i = data.to_image(image_info, r)?;
+        let o = self.buffer.replace(i);
+        drop(o);
+        None
+    }
+
     pub(crate) fn data(&mut self, image_info: ImageInfo, r: &RectSide) -> &Option<Image> {
-        if let Some(receiver) = &mut self.data_receiver {
-            if let Ok(data) = receiver.try_recv() {
-                if let Some(i) = data.to_image(image_info, r) {
-                    let o = self.buffer.replace(i);
-                    drop(o);
-                }
-            }
-        }
+        let _ = self.try_recv(image_info, r);
         return &self.buffer;
     }
 
@@ -555,7 +561,7 @@ impl StreamData {
     }
 
     fn seek_pts(&self, a: i64, b: i64) -> i64 {
-        self.duration * a / b + self.start
+        self.duration * a / std::cmp::max(b, 1) + self.start
     }
 }
 
@@ -602,10 +608,7 @@ impl MediaWrapper {
         let mut close_sender_holder = None;
 
         if is_output && let Some(s) = streams.best(MediaType::Video) {
-            match Context::from_parameters(s.parameters())
-                .map(|context| context.decoder().video())
-                .flatten()
-            {
+            match Context::from_parameters(s.parameters()).and_then(|c| c.decoder().video()) {
                 Ok(decoder) => {
                     let index = s.index();
                     let time_base = s.time_base();
@@ -647,6 +650,7 @@ impl MediaWrapper {
                     });
 
                     let o = ImageDataOutput::new(
+                        duration,
                         Some(data_receiver),
                         pause_sender,
                         seek_sender,
@@ -659,15 +663,12 @@ impl MediaWrapper {
                 }
             }
         } else {
-            let o = ImageDataOutput::new(None, pause_sender, seek_sender, close_sender);
+            let o = ImageDataOutput::new(duration, None, pause_sender, seek_sender, close_sender);
             let _ = sender.send(o).await;
         }
 
         if let Some(s) = streams.best(MediaType::Audio) {
-            match Context::from_parameters(s.parameters())
-                .map(|context| context.decoder().audio())
-                .flatten()
-            {
+            match Context::from_parameters(s.parameters()).and_then(|c| c.decoder().audio()) {
                 Ok(decoder) => {
                     let index = s.index();
                     let time_base = s.time_base();
