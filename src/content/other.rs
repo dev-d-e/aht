@@ -1,30 +1,16 @@
 use super::*;
 
 ///"Canv" represents canvas.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Canv {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     scroll_bar: ScrollBar,
 }
 
-impl std::fmt::Debug for Canv {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Canv");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Canv {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -37,50 +23,40 @@ impl Canv {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _)
+            | ActionKind::DoubleClick(c, _)
+            | ActionKind::Pressed(c, _)
+            | ActionKind::Cursor(c, _)
+            | ActionKind::CursorWithoutFocus(c, _)
+            | ActionKind::Sweep(c, _, _) => {
+                if self.painter.within(&self.rect, c) {
+                    acx.finish = true;
+                    return;
+                }
+            }
             _ => {}
         }
     }
 }
 
 ///"Iframe" represents iframe.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Iframe {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
 }
 
-impl std::fmt::Debug for Iframe {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Iframe");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Iframe {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -92,21 +68,25 @@ impl Iframe {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _)
+            | ActionKind::DoubleClick(c, _)
+            | ActionKind::Pressed(c, _)
+            | ActionKind::Cursor(c, _)
+            | ActionKind::CursorWithoutFocus(c, _)
+            | ActionKind::Sweep(c, _, _) => {
+                if self.painter.within(&self.rect, c) {
+                    acx.finish = true;
+                    return;
+                }
+            }
             _ => {}
         }
     }
