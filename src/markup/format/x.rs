@@ -1,4 +1,5 @@
 use super::*;
+use std::mem::take;
 
 pub(super) trait XParser {
     fn start_tag(&mut self, s: String);
@@ -9,7 +10,7 @@ pub(super) trait XParser {
 
     fn tag_text(&mut self, s: String);
 
-    fn attribute(&mut self, k: String, v: Option<String>);
+    fn attribute(&mut self, k: String, v: String);
 
     fn error(&mut self, e: Error);
 }
@@ -39,54 +40,48 @@ impl<'a> Context<'a> {
         }
     }
 
-    fn attribute_k(&mut self) -> Option<String> {
-        let k = self.temporary_attr.0.drain(..);
-        let k = k.as_str();
-        if k.is_empty() {
-            None
-        } else {
-            Some(k.to_string())
+    pub(super) fn parse(&mut self, mut i: impl Iterator<Item = char>) {
+        while let Some(c) = i.next() {
+            self.c = c;
+            (self.current_function)(self);
+            self.counter.count(c);
         }
     }
 
-    fn attribute_v(&mut self) -> Option<String> {
-        let v = self.temporary_attr.1.drain(..);
-        let v = v.as_str().trim();
-        if v.is_empty() {
-            None
-        } else {
-            Some(v.to_string())
-        }
+    pub(super) fn parse_str(&mut self, s: &str) {
+        self.parse(s.chars())
+    }
+
+    fn attribute_k(&mut self) -> String {
+        take(&mut self.temporary_attr.0)
+    }
+
+    fn attribute_v(&mut self) -> String {
+        take(&mut self.temporary_attr.1).trim().to_string()
     }
 
     fn attribute(&mut self) {
-        if let Some(k) = self.attribute_k() {
-            let v = self.attribute_v();
+        let k = self.attribute_k();
+        let v = self.attribute_v();
+        if k.len() > 0 {
             self.parser.attribute(k, v);
         }
     }
 
     fn attribute_push(&mut self) {
-        if let Some(k) = self.attribute_k() {
-            self.parser.attribute(k, None);
-            if let Some(v) = self.attribute_v() {
-                self.temporary_attr.0.push_str(&v);
-            }
+        let k = self.attribute_k();
+        if k.len() > 0 {
+            self.parser.attribute(k, String::new());
+        }
+        let v = self.attribute_v();
+        if v.len() > 0 {
+            self.temporary_attr.0 = v;
         }
     }
 
     fn output_error(&mut self, s: &str) {
         let e = self.counter.to_error(ErrorKind::Markup, s);
         self.parser.error(e);
-    }
-}
-
-pub(super) fn accept(context: &mut Context, buf: &str) {
-    let mut cs = buf.chars();
-    while let Some(c) = cs.next() {
-        context.c = c;
-        (context.current_function)(context);
-        context.counter.count(c);
     }
 }
 
