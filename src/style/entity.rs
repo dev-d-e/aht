@@ -1,39 +1,41 @@
 use super::*;
-use getset::{Getters, MutGetters};
+use crate::utils::ascii::*;
 use std::collections::HashMap;
+use std::mem::take;
 use std::str::FromStr;
 
 #[derive(Debug, Default, Getters, MutGetters)]
 pub(super) struct StyleSheet {
     #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
-    at_rules: AtRules,
+    meta_rules: MetaRules,
     #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
     style_rules: StyleRules,
 }
 
 impl StyleSheet {
-    pub(super) fn new(at_rules: AtRules, style_rules: StyleRules) -> Self {
+    pub(super) fn new(meta_rules: MetaRules, style_rules: StyleRules) -> Self {
         Self {
-            at_rules,
+            meta_rules,
             style_rules,
         }
     }
 }
 
 #[derive(Debug, Default)]
-pub(super) struct AtRules(Vec<AtRule>);
+#[repr(transparent)]
+pub(super) struct MetaRules(Vec<MetaRule>);
 
-deref!(AtRules, Vec<AtRule>, 0);
+deref!(MetaRules, Vec<MetaRule>, 0);
 
 #[derive(Debug, Default, Getters, MutGetters)]
-pub(super) struct AtRule {
+pub(super) struct MetaRule {
     #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
     key: String,
     #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
     attribute: HashMap<AttrName, Attribute>,
 }
 
-impl AtRule {
+impl MetaRule {
     fn new(key: String) -> Self {
         Self {
             key,
@@ -43,6 +45,7 @@ impl AtRule {
 }
 
 #[derive(Debug, Default)]
+#[repr(transparent)]
 pub(super) struct StyleRules(Vec<StyleRule>);
 
 deref!(StyleRules, Vec<StyleRule>, 0);
@@ -85,98 +88,138 @@ pub(crate) enum Combiner {
     PrecedingSibling(usize),
 }
 
-#[derive(Default)]
-pub(crate) struct SelectorHolder(Vec<(Selector, Combiner)>);
-
-deref!(SelectorHolder, Vec<(Selector, Combiner)>, 0);
-
-impl std::fmt::Debug for SelectorHolder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_set().entries(&self.0).finish()
+impl Combiner {
+    fn find(&self, s: &Selector, ks: &[ElementKey], eh: &ElementHolder) -> Vec<ElementKey> {
+        let mut r = Vec::new();
+        match self {
+            &Self::Descendant(n) => match s {
+                Selector::Mark(o) => {
+                    FindDescendant::new(MarkEq::new(o), n).elements(ks, eh, &mut r);
+                }
+                Selector::AttrName(o) => {
+                    FindDescendant::new(AttrExists::new(o), n).elements(ks, eh, &mut r);
+                }
+                Selector::Attribute(o, p) => {
+                    let f = FindDescendant::new(AttrMatch::new(o, p), n);
+                    if matches!(o, AttrName::ID) {
+                        if let Some(o) = f.elements_to_unique(ks, eh) {
+                            r.push(o)
+                        }
+                    } else {
+                        f.elements(ks, eh, &mut r);
+                    }
+                }
+                Selector::Any => {
+                    FindDescendant::new(AnyMatch, n).elements(ks, eh, &mut r);
+                }
+            },
+            &Self::NextSibling(n) => match s {
+                Selector::Mark(o) => {
+                    FindNextSibling::new(MarkEq::new(o), n).elements(ks, eh, &mut r);
+                }
+                Selector::AttrName(o) => {
+                    FindNextSibling::new(AttrExists::new(o), n).elements(ks, eh, &mut r);
+                }
+                Selector::Attribute(o, p) => {
+                    let f = FindNextSibling::new(AttrMatch::new(o, p), n);
+                    if matches!(o, AttrName::ID) {
+                        if let Some(o) = f.elements_to_unique(ks, eh) {
+                            r.push(o)
+                        }
+                    } else {
+                        f.elements(ks, eh, &mut r);
+                    }
+                }
+                Selector::Any => {
+                    FindNextSibling::new(AnyMatch, n).elements(ks, eh, &mut r);
+                }
+            },
+            &Self::PrecedingSibling(n) => match s {
+                Selector::Mark(o) => {
+                    FindPrecedingSibling::new(MarkEq::new(o), n).elements(ks, eh, &mut r);
+                }
+                Selector::AttrName(o) => {
+                    FindPrecedingSibling::new(AttrExists::new(o), n).elements(ks, eh, &mut r);
+                }
+                Selector::Attribute(o, p) => {
+                    let f = FindPrecedingSibling::new(AttrMatch::new(o, p), n);
+                    if matches!(o, AttrName::ID) {
+                        if let Some(o) = f.elements_to_unique(ks, eh) {
+                            r.push(o)
+                        }
+                    } else {
+                        f.elements(ks, eh, &mut r);
+                    }
+                }
+                Selector::Any => {
+                    FindPrecedingSibling::new(AnyMatch, n).elements(ks, eh, &mut r);
+                }
+            },
+        }
+        r
     }
 }
 
-impl SelectorHolder {
-    pub(crate) fn find(&self, mut v: Vec<Arc<RwLock<Element>>>) -> Vec<Arc<RwLock<Element>>> {
-        let mut o = &Combiner::Descendant(0);
-        for (k, c) in self.iter() {
-            let mut r = Vec::new();
-            match o {
-                Combiner::Descendant(n) => match k {
-                    Selector::Mark(o) => {
-                        let mut f = FindDescendant::new(MarkEq::new(o), *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                    Selector::AttrName(o) => {
-                        let mut f = FindDescendant::new(AttrExists::new(o), *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                    Selector::Attribute(o, s) => {
-                        let mut f = FindDescendant::new(AttrMatch::new(o, s), *n);
-                        if matches!(o, AttrName::ID) {
-                            if let Some(o) = v.iter().find_map(|k| f.find_unique(k)) {
-                                r.push(o)
-                            }
-                        } else {
-                            v.iter().for_each(|k| f.find(k, &mut r));
-                        }
-                    }
-                    Selector::Any => {
-                        let mut f = FindDescendant::new(AnyMatch, *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                },
-                Combiner::NextSibling(n) => match k {
-                    Selector::Mark(o) => {
-                        let mut f = FindNextSibling::new(MarkEq::new(o), *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                    Selector::AttrName(o) => {
-                        let mut f = FindNextSibling::new(AttrExists::new(o), *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                    Selector::Attribute(o, s) => {
-                        let mut f = FindNextSibling::new(AttrMatch::new(o, s), *n);
-                        if matches!(o, AttrName::ID) {
-                            if let Some(o) = v.iter().find_map(|k| f.find_unique(k)) {
-                                r.push(o)
-                            }
-                        } else {
-                            v.iter().for_each(|k| f.find(k, &mut r));
-                        }
-                    }
-                    Selector::Any => {
-                        let mut f = FindNextSibling::new(AnyMatch, *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                },
-                Combiner::PrecedingSibling(n) => match k {
-                    Selector::Mark(o) => {
-                        let mut f = FindPrecedingSibling::new(MarkEq::new(o), *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                    Selector::AttrName(o) => {
-                        let mut f = FindPrecedingSibling::new(AttrExists::new(o), *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                    Selector::Attribute(o, s) => {
-                        let mut f = FindPrecedingSibling::new(AttrMatch::new(o, s), *n);
-                        if matches!(o, AttrName::ID) {
-                            if let Some(o) = v.iter().find_map(|k| f.find_unique(k)) {
-                                r.push(o)
-                            }
-                        } else {
-                            v.iter().for_each(|k| f.find(k, &mut r));
-                        }
-                    }
-                    Selector::Any => {
-                        let mut f = FindPrecedingSibling::new(AnyMatch, *n);
-                        v.iter().for_each(|k| f.find(k, &mut r));
-                    }
-                },
+impl FromStr for Combiner {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let mut o = s.chars();
+        if let Some(c) = o.next() {
+            let n = o.as_str();
+            let n = if n.is_empty() { 0 } else { to_usize(n)? };
+            match c {
+                QUESTION => {
+                    return Ok(Self::Descendant(n));
+                }
+                PLUS => {
+                    return Ok(Self::NextSibling(n));
+                }
+                HYPHEN => {
+                    return Ok(Self::PrecedingSibling(n));
+                }
+                _ => return Err((ErrorKind::Style, "invalid combiner").into()),
             }
-            v = r;
-            o = c;
+        }
+        Ok(Self::Descendant(0))
+    }
+}
+
+#[derive(Debug, Default)]
+#[repr(transparent)]
+pub(crate) struct SelectorHolder(Vec<(Combiner, Selector)>);
+
+deref!(SelectorHolder, Vec<(Combiner, Selector)>, 0);
+
+impl SelectorHolder {
+    pub(crate) fn find(&self, eh: &ElementHolder) -> Vec<ElementKey> {
+        let mut v = Vec::new();
+        let mut i = self.iter();
+        if let Some((_, s)) = i.next() {
+            match s {
+                Selector::Mark(o) => {
+                    FindDescendant::new(MarkEq::new(o), 0).all_with_first_root(eh, &mut v);
+                }
+                Selector::AttrName(o) => {
+                    FindDescendant::new(AttrExists::new(o), 0).all_with_first_root(eh, &mut v);
+                }
+                Selector::Attribute(o, p) => {
+                    let f = FindDescendant::new(AttrMatch::new(o, p), 0);
+                    if matches!(o, AttrName::ID) {
+                        if let Some(o) = f.unique_with_first_root(eh) {
+                            v.push(o)
+                        }
+                    } else {
+                        f.all_with_first_root(eh, &mut v);
+                    }
+                }
+                Selector::Any => {
+                    FindDescendant::new(AnyMatch, 0).all_with_first_root(eh, &mut v);
+                }
+            }
+        }
+        for (c, s) in i {
+            v = c.find(s, &v, eh);
         }
         v
     }
@@ -184,7 +227,7 @@ impl SelectorHolder {
 
 #[derive(Debug)]
 enum RuleKind {
-    AtRule,
+    MetaRule,
     StyleRule,
 }
 
@@ -196,10 +239,10 @@ impl Default for RuleKind {
 
 impl RuleKind {}
 
-#[derive(Debug, Default, Getters, MutGetters)]
+#[derive(Debug, Default)]
 pub(super) struct StyleSheetBuilder {
-    o: StyleRule,
-    a: AtRule,
+    a: MetaRule,
+    b: StyleRule,
     k: RuleKind,
     rst: StyleSheet,
     error: ErrorHolder,
@@ -216,66 +259,48 @@ impl StyleSheetBuilder {
 }
 
 impl Output for StyleSheetBuilder {
-    fn at(&mut self, s: String) {
+    fn meta(&mut self, s: String) {
         self.a.key_mut().push_str(&s);
-        self.k = RuleKind::AtRule;
+        self.k = RuleKind::MetaRule;
     }
 
-    fn mark_selector(&mut self, s: String) {
-        if let Ok(m) = Mark::try_from(&s) {
-            let k = (Selector::Mark(m), Combiner::Descendant(0));
-            self.o.key_mut().push(k);
-        }
+    fn mark_selector(&mut self, c: String, s: String) {
+        let c = result_return!(Combiner::from_str(&c).map_err(|e| self.error(e)));
+        let m = result_return!(Mark::try_from(&s).map_err(|e| self.error(e)));
+        let k = (c, Selector::Mark(m));
+        self.b.key_mut().push(k);
     }
 
-    fn attribute_selector(&mut self, k: String, v: String) {
-        if k.is_empty() {
-            let k = (
-                Selector::Attribute(AttrName::CLASS, AttrPattern::Contain(v)),
-                Combiner::Descendant(0),
-            );
-            self.o.key_mut().push(k);
+    fn attribute_selector(&mut self, c: String, k: String, v: String) {
+        let c = result_return!(Combiner::from_str(&c).map_err(|e| self.error(e)));
+        let a = if k.is_empty() {
+            AttrName::CLASS
         } else {
-            match AttrName::from_str(&k) {
-                Ok(a) => {
-                    let k = (
-                        Selector::Attribute(a, AttrPattern::Contain(v)),
-                        Combiner::Descendant(0),
-                    );
-                    self.o.key_mut().push(k);
-                }
-                Err(e) => {
-                    error!("{e}");
-                }
-            }
-        }
+            result_return!(AttrName::from_str(&k).map_err(|e| self.error(e)))
+        };
+        let k = (c, Selector::Attribute(a, AttrPattern::Contain(v)));
+        self.b.key_mut().push(k);
     }
 
     fn attribute(&mut self, k: String, mut v: String) {
-        match Attribute::from_s(&k, &mut v) {
-            Ok(a) => match self.k {
-                RuleKind::AtRule => {
-                    self.a.attribute_mut().insert(a.name(), a);
-                }
-                RuleKind::StyleRule => {
-                    self.o.attribute_mut().insert(a.name(), a);
-                }
-            },
-            Err(e) => {
-                error!("{e}");
+        let a = result_return!(Attribute::from_s(&k, &mut v).map_err(|e| self.error(e)));
+        match self.k {
+            RuleKind::MetaRule => {
+                self.a.attribute_mut().insert(a.name(), a);
+            }
+            RuleKind::StyleRule => {
+                self.b.attribute_mut().insert(a.name(), a);
             }
         }
     }
 
     fn end_block(&mut self) {
         match self.k {
-            RuleKind::AtRule => {
-                let a = std::mem::take(&mut self.a);
-                self.rst.at_rules_mut().push(a);
+            RuleKind::MetaRule => {
+                self.rst.meta_rules_mut().push(take(&mut self.a));
             }
             RuleKind::StyleRule => {
-                let o = std::mem::take(&mut self.o);
-                self.rst.style_rules_mut().push(o);
+                self.rst.style_rules_mut().push(take(&mut self.b));
             }
         }
         self.k = RuleKind::StyleRule;
