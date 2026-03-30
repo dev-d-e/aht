@@ -1,9 +1,8 @@
 use super::*;
-use getset::Getters;
 use pollster::block_on;
 use wgpu::{
-    include_wgsl, Device, DeviceDescriptor, DownlevelFlags, Features, Instance, InstanceDescriptor,
-    Limits, MemoryHints, Queue, RequestAdapterOptions, Trace,
+    Device, DeviceDescriptor, DownlevelFlags, Features, Instance, InstanceDescriptor, Limits,
+    MemoryHints, Queue, RequestAdapterOptions, Trace, include_wgsl,
 };
 
 #[derive(Getters)]
@@ -16,7 +15,7 @@ pub struct ComputeQueueHolder {
 
 impl ComputeQueueHolder {
     pub fn new() -> Result<Self> {
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
 
         let adapter = block_on(instance.request_adapter(&RequestAdapterOptions::default()))
             .map_err(|e| to_err(ErrorKind::Gpu, e))?;
