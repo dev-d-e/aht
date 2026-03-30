@@ -4,49 +4,52 @@ mod js;
 use crate::markup::*;
 use crate::page::*;
 use crate::utils::*;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, RwLock};
 
 enum CommandKind {
-    AddGlobalObject(String, Arc<RwLock<Element>>),
     ExecuteScript(String),
+    Rebuild,
     Shutdown,
 }
 
 #[derive(Debug)]
 pub(crate) struct ScriptRuntime {
-    sender: Option<Sender<CommandKind>>,
+    sender: Sender<CommandKind>,
+}
+
+impl Drop for ScriptRuntime {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
 }
 
 impl ScriptRuntime {
-    pub(crate) fn new() -> Self {
-        Self { sender: None }
-    }
-
     #[allow(unreachable_patterns)]
-    pub(crate) fn run(&mut self, s: &str, script_type: &ScriptType, context: &mut PageContext) {
-        match script_type {
-            #[cfg(feature = "js")]
-            ScriptType::JS => self.run_js(s, context),
-            _ => {
-                error!("unsupported {:?}", script_type.to_string())
-            }
-        };
-    }
-
-    #[cfg(feature = "js")]
-    fn run_js(&mut self, s: &str, context: &mut PageContext) {
-        let (tx, rx) = channel();
-        self.sender.replace(tx);
+    pub(crate) fn new(t: ScriptType, cx: Arc<RwLock<PageContext>>) -> Self {
+        let (sender, receiver) = channel();
 
         std::thread::spawn(move || {
-            js::run(rx);
+            match t {
+                #[cfg(feature = "js")]
+                ScriptType::JS => js::run(cx, receiver),
+                _ => {
+                    error!("unsupported {:?}", t)
+                }
+            };
         });
+        Self { sender }
+    }
 
-        if let Some(tx) = &self.sender {
-            let e = context.body_element();
-            let _ = tx.send(CommandKind::AddGlobalObject("body".to_string(), e.clone()));
-            let _ = tx.send(CommandKind::ExecuteScript(s.to_string()));
-        }
+    pub(crate) fn exec(&mut self, s: String) {
+        let _ = self.sender.send(CommandKind::ExecuteScript(s));
+    }
+
+    pub(crate) fn rebuild(&mut self) {
+        let _ = self.sender.send(CommandKind::Rebuild);
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        let _ = self.sender.send(CommandKind::Shutdown);
     }
 }
