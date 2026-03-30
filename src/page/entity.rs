@@ -1,80 +1,73 @@
 use super::*;
-use getset::{CopyGetters, Getters, MutGetters, Setters};
 use std::sync::{Arc, RwLock};
 
 ///Represents page.
+#[derive(CopyGetters, Getters, MutGetters, Setters)]
 pub struct Page {
-    context: PageContext,
+    context: Arc<RwLock<PageContext>>,
     head: Head,
     body: Body,
     style: Style,
     script: Script,
-    callback: Vec<Box<dyn FnMut(&ActionKind, &mut PageContext)>>,
+    callback: Vec<DrawUnitKey>,
+    #[getset(get_copy = "pub", set = "pub")]
+    scale_factor: f32,
 }
 
-deref!(Page, PageContext, context);
+deref!(Page, Arc<RwLock<PageContext>>, context);
 
 impl std::fmt::Debug for Page {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Page")
-            .field("head", &self.head)
-            .field("body", &self.body)
-            .field("style", &self.style)
-            .field("script", &self.script)
-            .finish_non_exhaustive()
+        let mut f = f.debug_struct("Page");
+        if let Ok(o) = self.context.try_read() {
+            f.field("context", &o);
+        }
+        f.finish_non_exhaustive()
     }
 }
 
 impl Page {
     pub(crate) fn new(
-        root: Element,
-        head_element: Arc<RwLock<Element>>,
-        body_element: Arc<RwLock<Element>>,
-        style_element: Arc<RwLock<Element>>,
-        script_element: Arc<RwLock<Element>>,
+        eh: ElementHolder,
+        head_key: ElementKey,
+        body_key: ElementKey,
+        style_key: ElementKey,
+        script_key: ElementKey,
     ) -> Self {
-        let head = Head::new(head_element.clone());
-        let body = Body::new(body_element.clone());
-        let style = Style::new(style_element.clone());
-        let script = Script::new(script_element.clone());
+        let mut context = PageContext::new(eh, head_key, body_key, style_key, script_key);
+        let head = Head::new(&mut context);
+        let body = Body::new(&mut context);
+        let style = Style::new(&mut context);
+        let script = Script::new(&mut context);
+        let context = Arc::new(RwLock::new(context));
         let mut page = Self {
-            context: PageContext::new(
-                root,
-                head_element,
-                body_element,
-                style_element,
-                script_element,
-            ),
+            context,
             head,
             body,
             style,
             script,
             callback: Default::default(),
+            scale_factor: 1.0,
         };
-        page.style.build(&mut page.context);
-        page.script.run(&mut page.context);
+        page.script.build(page.context.clone());
         page
     }
 
     pub(crate) fn renew(&mut self) {
-        self.head = Head::new(self.head_element.clone());
-        self.body = Body::new(self.body_element.clone());
-        self.style = Style::new(self.style_element.clone());
-        self.script = Script::new(self.script_element.clone());
-        self.style.build(&mut self.context);
-        self.script.run(&mut self.context);
+        if let Ok(mut context) = self.context.write() {
+            self.head = Head::new(&mut context);
+            self.body = Body::new(&mut context);
+        }
     }
 
     ///Parse a string slice.
     fn parse0(buf: &str, o: MarkNumber) -> (Option<Self>, ErrorHolder) {
-        let (e, mut err) = Element::parse_one(buf, o);
-        let p = e
-            .map(|e| {
-                e.to_page()
-                    .map_err(|_| err.push((ErrorKind::Markup, "no page").into()))
-                    .ok()
-            })
-            .flatten();
+        let (e, mut err) = ElementHolder::parse(buf, o);
+        let p = e.and_then(|e| {
+            e.try_into()
+                .map_err(|_| err.push((ErrorKind::Markup, "no page").into()))
+                .ok()
+        });
         (p, err)
     }
 
@@ -90,133 +83,90 @@ impl Page {
 
     ///Reset width and height, each number is not equal to the size of window if the coordinate is not 0.0
     pub fn resize(&mut self, width: f32, height: f32) {
-        self.body.resize(width, height);
+        if let Ok(mut context) = self.context.write() {
+            self.body.resize(width, height, &mut context);
+        }
     }
 
     ///Reset zero point on rectangular coordinates and size. `resize`
     pub fn reset(&mut self, x: f32, y: f32, width: f32, height: f32) {
-        self.body.reset(x, y, width, height);
+        if let Ok(mut context) = self.context.write() {
+            self.body.reset(x, y, width, height, &mut context);
+        }
     }
 
     pub(crate) fn draw_body(&mut self, surface: skia_safe::Surface) {
-        self.body.draw(DrawCtx::new(surface, &mut self.context));
+        if let Ok(mut context) = self.context.write() {
+            self.body.draw(DrawCtx::new(surface), &mut context);
+        }
     }
 
     ///Receive a action.
     pub fn receive_action(&mut self, a: ActionKind) {
-        for f in &mut self.callback {
-            f(&a, &mut self.context);
-        }
-
-        if let Some(a) = self.context.consume_action(a) {
-            let o = ActionCtx::new(a, &mut self.context, &mut self.callback);
-            self.body.consume_action(o);
+        if let Ok(mut context) = self.context.try_write() {
+            let o = ActionCtx::new(a, &mut self.callback);
+            self.body.consume_action(o, &mut context);
         }
     }
 }
 
 ///Represents the context of page.
-#[derive(CopyGetters, Getters, MutGetters, Setters)]
+#[derive(CopyGetters, Debug, Getters, MutGetters, Setters)]
 pub struct PageContext {
-    root: Arc<RwLock<Element>>,
-    #[getset(get = "pub")]
-    head_element: Arc<RwLock<Element>>,
-    #[getset(get = "pub")]
-    body_element: Arc<RwLock<Element>>,
-    #[getset(get = "pub")]
-    style_element: Arc<RwLock<Element>>,
-    #[getset(get = "pub")]
-    script_element: Arc<RwLock<Element>>,
-    #[getset(get_copy = "pub", set = "pub")]
-    scale_factor: f32,
-    input_to: Option<Arc<RwLock<Element>>>,
+    eh: ElementHolder,
+    #[getset(get_copy = "pub")]
+    head_key: ElementKey,
+    #[getset(get_copy = "pub")]
+    body_key: ElementKey,
+    #[getset(get_copy = "pub")]
+    style_key: ElementKey,
+    #[getset(get_copy = "pub")]
+    script_key: ElementKey,
+}
+
+deref!(PageContext, ElementHolder, eh);
+
+impl std::fmt::Display for PageContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PageContext {{ eh: {}, ", self.eh)?;
+        write!(f, "head_key: {:?}, ", self.head_key)?;
+        write!(f, "body_key: {:?}, ", self.body_key)?;
+        write!(f, "style_key: {:?}, ", self.style_key)?;
+        write!(f, "script_key: {:?} }}", self.script_key)
+    }
 }
 
 impl PageContext {
     fn new(
-        root: Element,
-        head_element: Arc<RwLock<Element>>,
-        body_element: Arc<RwLock<Element>>,
-        style_element: Arc<RwLock<Element>>,
-        script_element: Arc<RwLock<Element>>,
+        eh: ElementHolder,
+        head_key: ElementKey,
+        body_key: ElementKey,
+        style_key: ElementKey,
+        script_key: ElementKey,
     ) -> Self {
         Self {
-            root: Arc::new(RwLock::new(root)),
-            head_element,
-            body_element,
-            style_element,
-            script_element,
-            scale_factor: 1.0,
-            input_to: None,
+            eh,
+            head_key,
+            body_key,
+            style_key,
+            script_key,
         }
     }
 
-    pub(crate) fn set_input_to(&mut self, a: Arc<RwLock<Element>>) {
-        self.input_to.replace(a);
+    pub fn head_element(&self) -> Option<&Element> {
+        self.eh.get(self.head_key)
     }
 
-    pub(crate) fn take_input_to(&mut self) {
-        self.input_to.take();
+    pub fn body_element(&self) -> Option<&Element> {
+        self.eh.get(self.body_key)
     }
 
-    fn consume_action(&mut self, a: ActionKind) -> Option<ActionKind> {
-        match &a {
-            ActionKind::Click(_, _) => {
-                self.input_to.take();
-            }
-            ActionKind::DoubleClick(_, _) => {}
-            ActionKind::Focused(o) => {
-                if !o {
-                    self.input_to.take();
-                }
-            }
-            ActionKind::Cursor(_) => {}
-            ActionKind::CursorWithoutFocus(_) => {}
-            ActionKind::CursorEntered => {}
-            ActionKind::CursorLeft => {}
-            ActionKind::InputStr(s) => {
-                if s.len() > 0 {
-                    if let Some(o) = &mut self.input_to {
-                        if let Ok(mut e) = o.try_write() {
-                            if let Some(a) = e.attribute_mut().value_or_insert() {
-                                a.push_str(&s);
-                            }
-                        }
-                    }
-                }
-                return None;
-            }
-            ActionKind::DeleteFront(_, n) => {
-                if let Some(o) = &mut self.input_to {
-                    if let Ok(mut e) = o.try_write() {
-                        if let Some(a) = e.attribute_mut().value_or_insert() {
-                            let mut n = *n;
-                            while n > 0 {
-                                a.pop();
-                                n -= 1;
-                            }
-                        }
-                    }
-                }
-                return None;
-            }
-            ActionKind::DeleteBack(_, n) => {
-                if let Some(o) = &mut self.input_to {
-                    if let Ok(mut e) = o.try_write() {
-                        if let Some(a) = e.attribute_mut().value_or_insert() {
-                            let mut n = *n;
-                            while n > 0 {
-                                a.pop();
-                                n -= 1;
-                            }
-                        }
-                    }
-                }
-                return None;
-            }
-            ActionKind::Sweep(_, _) => {}
-        }
-        Some(a)
+    pub fn style_element(&self) -> Option<&Element> {
+        self.eh.get(self.style_key)
+    }
+
+    pub fn script_element(&self) -> Option<&Element> {
+        self.eh.get(self.script_key)
     }
 }
 
@@ -225,15 +175,17 @@ impl PageContext {
 pub enum ActionKind {
     Click(Coord2D, u8),
     DoubleClick(Coord2D, u8),
+    Pressed(Coord2D, u8),
+    Released(u8),
     Focused(bool),
-    Cursor(Coord2D),
-    CursorWithoutFocus(Coord2D),
+    Cursor(Coord2D, (f32, f32)),
+    CursorWithoutFocus(Coord2D, (f32, f32)),
     CursorEntered,
     CursorLeft,
     InputStr(String),
-    DeleteFront(Coord2D, u32),
-    DeleteBack(Coord2D, u32),
-    Sweep(Coord2D, Coord2D),
+    DeleteFront(usize),
+    DeleteBack(usize),
+    Sweep(Coord2D, Coord2D, (f32, f32)),
 }
 
 impl ActionKind {
@@ -241,14 +193,13 @@ impl ActionKind {
         match self {
             Self::Click(c, _)
             | Self::DoubleClick(c, _)
-            | Self::Cursor(c)
-            | Self::CursorWithoutFocus(c)
-            | Self::DeleteFront(c, _)
-            | Self::DeleteBack(c, _) => {
+            | Self::Pressed(c, _)
+            | Self::Cursor(c, _)
+            | Self::CursorWithoutFocus(c, _) => {
                 c.set_x(c.x() + x);
                 c.set_y(c.y() + y);
             }
-            Self::Sweep(a, b) => {
+            Self::Sweep(a, b, _) => {
                 a.set_x(a.x() + x);
                 a.set_y(a.y() + y);
                 b.set_x(b.x() + x);
