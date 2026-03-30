@@ -1,65 +1,27 @@
 use super::*;
-use std::sync::{Arc, RwLock};
 
 ///"Head" represents head.
+#[derive(Debug, Getters)]
 pub(crate) struct Head {
-    element: Arc<RwLock<Element>>,
-}
-
-impl std::fmt::Debug for Head {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Head");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.finish()
-    }
+    #[getset(get = "pub(crate)")]
+    title: Option<ElementKey>,
 }
 
 impl Head {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
-        Self { element }
-    }
-}
-
-///"Title" represents title.
-pub(crate) struct Title {
-    element: Arc<RwLock<Element>>,
-}
-
-impl std::fmt::Debug for Title {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Title");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
+    pub(crate) fn new(cx: &mut PageContext) -> Self {
+        let mut title = None;
+        if let Some(e) = cx.head_element() {
+            for &k in e.subset() {
+                if let Some(o) = cx.get(k) {
+                    match o.mark_type() {
+                        Mark::TITLE => {
+                            title.replace(k);
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
-        f.finish()
-    }
-}
-
-impl Title {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
-        Self { element }
-    }
-}
-
-///"Aht" represents root.
-pub(crate) struct Aht {
-    element: Arc<RwLock<Element>>,
-}
-
-impl std::fmt::Debug for Aht {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Aht");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.finish()
-    }
-}
-
-impl Aht {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
-        Self { element }
+        Self { title }
     }
 }
