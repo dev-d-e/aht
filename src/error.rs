@@ -2,7 +2,7 @@
 A module for error.
 */
 
-use getset::{Getters, MutGetters};
+use crate::utils::*;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -54,15 +54,11 @@ impl std::fmt::Debug for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut s = format!("{:?} Error.", self.kind);
+        write!(f, "{:?} Error. ", self.kind)?;
         if let Some(p) = self.p {
-            s.push_str(&format!(" {p:?}"));
+            write!(f, "{:?} ", p)?;
         }
-        if self.s.len() > 0 {
-            s.push(' ');
-            s.push_str(&self.s);
-        }
-        f.write_str(&s)
+        write!(f, "{}", self.s)
     }
 }
 
@@ -92,11 +88,25 @@ pub(crate) fn to_err(kind: ErrorKind, e: impl std::error::Error) -> Error {
 }
 
 ///Collection of `Error`.
-#[derive(Debug, Default, Getters, MutGetters)]
+#[derive(Default)]
 pub struct ErrorHolder {
     v: Vec<Error>,
 }
 
 deref!(ErrorHolder, Vec<Error>, v);
 
-impl ErrorHolder {}
+impl std::fmt::Debug for ErrorHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl std::fmt::Display for ErrorHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ErrorHolder {{[")?;
+        for o in &self.v {
+            writeln!(f, "{}", o)?;
+        }
+        write!(f, "]}}")
+    }
+}
