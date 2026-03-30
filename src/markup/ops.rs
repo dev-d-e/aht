@@ -1,6 +1,4 @@
 use super::*;
-use getset::{CopyGetters, Setters};
-use std::sync::{Arc, RwLock};
 
 ///Represents requirement of searching elements.
 pub trait Requirement {
@@ -16,7 +14,6 @@ where
     f: T,
     #[getset(get_copy = "pub", set = "pub")]
     n: usize,
-    i: usize,
 }
 
 impl<T> FindDescendant<T>
@@ -25,49 +22,80 @@ where
 {
     ///Creates a new instance. `n` is nesting number, searches all descendant if it's 0.
     pub fn new(f: T, n: usize) -> Self {
-        Self { f, n, i: n }
+        Self { f, n }
     }
 
-    fn all(&self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
-        if let Ok(e) = o.read() {
+    #[inline]
+    fn all(&self, k: ElementKey, eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        if let Some(e) = eh.get(k) {
             if self.f.satisfy(&e) {
-                v.push(o.clone())
+                v.push(k)
             }
-            e.subset().iter().for_each(|k| self.all(k, v));
+            e.subset().iter().for_each(|&k| self.all(k, eh, v));
         }
     }
 
-    fn subtract(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
-        self.i -= 1;
-        if let Ok(e) = o.read() {
+    #[inline]
+    fn subtract(&self, k: ElementKey, i: usize, eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        if let Some(e) = eh.get(k) {
             if self.f.satisfy(&e) {
-                v.push(o.clone())
+                v.push(k)
             }
-            if self.i > 0 {
-                e.subset().iter().for_each(|k| self.subtract(k, v));
+            if i > 1 {
+                let i = i - 1;
+                e.subset().iter().for_each(|&k| self.subtract(k, i, eh, v));
             }
         }
     }
 
     ///Gets elements that satisfy the requirements by an element to the vec.
-    pub fn find(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
+    pub fn element(&self, k: ElementKey, eh: &ElementHolder, v: &mut Vec<ElementKey>) {
         if self.n == 0 {
-            self.all(o, v)
+            if let Some(e) = eh.get(k) {
+                e.subset().iter().for_each(|&k| self.all(k, eh, v));
+            }
         } else {
-            self.i = self.n;
-            self.subtract(o, v)
+            if let Some(e) = eh.get(k) {
+                let i = self.n;
+                e.subset().iter().for_each(|&k| self.subtract(k, i, eh, v));
+            }
+        }
+    }
+
+    ///Gets elements that satisfy the requirements by some elements to the vec.
+    pub fn elements(&self, ks: &[ElementKey], eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        for &k in ks {
+            self.element(k, eh, v);
         }
     }
 
     ///Returns unique element that satisfy the requirements by an element.
-    pub fn find_unique(&mut self, o: &Arc<RwLock<Element>>) -> Option<Arc<RwLock<Element>>> {
-        if let Ok(e) = o.read() {
-            if self.f.satisfy(&e) {
-                return Some(o.clone());
-            }
-            return e.subset().iter().find_map(|k| self.find_unique(k));
+    pub fn element_to_unique(&self, k: ElementKey, eh: &ElementHolder) -> Option<ElementKey> {
+        let e = eh.get(k)?;
+        if self.f.satisfy(&e) {
+            return Some(k);
         }
-        None
+        e.subset()
+            .iter()
+            .find_map(|&k| self.element_to_unique(k, eh))
+    }
+
+    ///Returns unique element that satisfy the requirements by some elements.
+    pub fn elements_to_unique(&self, ks: &[ElementKey], eh: &ElementHolder) -> Option<ElementKey> {
+        ks.iter().find_map(|&k| self.element_to_unique(k, eh))
+    }
+
+    #[inline]
+    pub(crate) fn all_with_first_root(&self, eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        if let Some(k) = eh.first_root() {
+            self.all(k, eh, v);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn unique_with_first_root(&self, eh: &ElementHolder) -> Option<ElementKey> {
+        let k = eh.first_root()?;
+        self.element_to_unique(k, eh)
     }
 }
 
@@ -91,58 +119,51 @@ where
         Self { f, n }
     }
 
-    fn subset_end_index(&self, i: usize, subset_len: usize) -> usize {
-        if self.n == 0 {
-            subset_len
+    #[inline]
+    fn get<'a>(&self, k: ElementKey, eh: &'a ElementHolder) -> Option<&'a [ElementKey]> {
+        let e = eh.get(eh.get(k)?.upper().clone()?)?;
+        let i = e.subset_element_index(k)?;
+        let n = i + self.n;
+        let i = i + 1;
+        let subset_len = e.subset().len();
+        if self.n == 0 || n >= subset_len {
+            e.subset().get(i..)
         } else {
-            subset_len.min(i + self.n + 1)
+            e.subset().get(i..=n)
         }
     }
 
     ///Gets elements that satisfy the requirements by an element to the vec.
-    pub fn find(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
-        let mut p = None;
-        if let Ok(e) = o.read() {
-            p = e.upper().as_ref().cloned();
-        }
-        if let Some(p) = p {
-            if let Ok(e) = p.read() {
-                if let Some(i) = e.subset_element_index(o) {
-                    let n = self.subset_end_index(i, e.subset().len());
-                    e.subset().range(i..n).for_each(|o| {
-                        if let Ok(e) = o.read() {
-                            if self.f.satisfy(&e) {
-                                v.push(o.clone());
-                            }
-                        }
-                    });
+    pub fn element(&self, k: ElementKey, eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        if let Some(r) = self.get(k, eh) {
+            r.into_iter().for_each(|&j| {
+                if let Some(e) = eh.get(j) {
+                    if self.f.satisfy(&e) {
+                        v.push(j);
+                    }
                 }
-            }
+            });
+        }
+    }
+
+    ///Gets elements that satisfy the requirements by some elements to the vec.
+    pub fn elements(&self, ks: &[ElementKey], eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        for &k in ks {
+            self.element(k, eh, v);
         }
     }
 
     ///Returns unique element that satisfy the requirements by an element.
-    pub fn find_unique(&mut self, o: &Arc<RwLock<Element>>) -> Option<Arc<RwLock<Element>>> {
-        let mut p = None;
-        if let Ok(e) = o.read() {
-            p = e.upper().as_ref().cloned();
-        }
-        if let Some(p) = p {
-            if let Ok(e) = p.read() {
-                if let Some(i) = e.subset_element_index(o) {
-                    let n = self.subset_end_index(i, e.subset().len());
-                    return e.subset().range(i..n).find_map(|o| {
-                        if let Ok(e) = o.read() {
-                            if self.f.satisfy(&e) {
-                                return Some(o.clone());
-                            }
-                        }
-                        None
-                    });
-                }
-            }
-        }
-        None
+    pub fn element_to_unique(&self, k: ElementKey, eh: &ElementHolder) -> Option<ElementKey> {
+        self.get(k, eh)?.into_iter().find_map(|&j| {
+            let e = eh.get(j)?;
+            if self.f.satisfy(&e) { Some(j) } else { None }
+        })
+    }
+
+    ///Returns unique element that satisfy the requirements by some elements.
+    pub fn elements_to_unique(&self, ks: &[ElementKey], eh: &ElementHolder) -> Option<ElementKey> {
+        ks.iter().find_map(|&k| self.element_to_unique(k, eh))
     }
 }
 
@@ -166,58 +187,49 @@ where
         Self { f, n }
     }
 
-    fn subset_start_index(&self, i: usize) -> usize {
+    #[inline]
+    fn get<'a>(&self, k: ElementKey, eh: &'a ElementHolder) -> Option<&'a [ElementKey]> {
+        let e = eh.get(eh.get(k)?.upper().clone()?)?;
+        let i = e.subset_element_index(k)?;
         if self.n == 0 {
-            0
+            e.subset().get(..i)
         } else {
-            i.saturating_sub(self.n)
+            let n = i.saturating_sub(self.n);
+            e.subset().get(n..i)
         }
     }
 
     ///Gets elements that satisfy the requirements by an element to the vec.
-    pub fn find(&mut self, o: &Arc<RwLock<Element>>, v: &mut Vec<Arc<RwLock<Element>>>) {
-        let mut p = None;
-        if let Ok(e) = o.read() {
-            p = e.upper().as_ref().cloned();
-        }
-        if let Some(p) = p {
-            if let Ok(e) = p.read() {
-                if let Some(i) = e.subset_element_index(o) {
-                    let n = self.subset_start_index(i);
-                    e.subset().range(n..=i).for_each(|o| {
-                        if let Ok(e) = o.read() {
-                            if self.f.satisfy(&e) {
-                                v.push(o.clone());
-                            }
-                        }
-                    })
+    pub fn element(&self, k: ElementKey, eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        if let Some(r) = self.get(k, eh) {
+            r.into_iter().for_each(|&j| {
+                if let Some(e) = eh.get(j) {
+                    if self.f.satisfy(&e) {
+                        v.push(j);
+                    }
                 }
-            }
+            })
+        }
+    }
+
+    ///Gets elements that satisfy the requirements by some elements to the vec.
+    pub fn elements(&self, ks: &[ElementKey], eh: &ElementHolder, v: &mut Vec<ElementKey>) {
+        for &k in ks {
+            self.element(k, eh, v);
         }
     }
 
     ///Returns unique element that satisfy the requirements by an element.
-    pub fn find_unique(&mut self, o: &Arc<RwLock<Element>>) -> Option<Arc<RwLock<Element>>> {
-        let mut p = None;
-        if let Ok(e) = o.read() {
-            p = e.upper().as_ref().cloned();
-        }
-        if let Some(p) = p {
-            if let Ok(e) = p.read() {
-                if let Some(i) = e.subset_element_index(o) {
-                    let n = self.subset_start_index(i);
-                    return e.subset().range(n..=i).find_map(|o| {
-                        if let Ok(e) = o.read() {
-                            if self.f.satisfy(&e) {
-                                return Some(o.clone());
-                            }
-                        }
-                        None
-                    });
-                }
-            }
-        }
-        None
+    pub fn element_to_unique(&self, k: ElementKey, eh: &ElementHolder) -> Option<ElementKey> {
+        self.get(k, eh)?.into_iter().find_map(|&j| {
+            let e = eh.get(j)?;
+            if self.f.satisfy(&e) { Some(j) } else { None }
+        })
+    }
+
+    ///Returns unique element that satisfy the requirements by some elements.
+    pub fn elements_to_unique(&self, ks: &[ElementKey], eh: &ElementHolder) -> Option<ElementKey> {
+        ks.iter().find_map(|&k| self.element_to_unique(k, eh))
     }
 }
 
