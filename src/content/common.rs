@@ -1,14 +1,18 @@
 use super::*;
 use crate::imagesound::*;
-use getset::{CopyGetters, Getters, MutGetters, Setters};
-use skia_safe::codec::{gif_decoder, jpeg_decoder, png_decoder, webp_decoder};
+use image::{ImageFormat, ImageReader};
+use skia_safe::codec::{
+    bmp_decoder, gif_decoder, ico_decoder, jpeg_decoder, png_decoder, wbmp_decoder, webp_decoder,
+};
 use skia_safe::codecs::Decoder;
 use skia_safe::utils::text_utils::Align;
 use skia_safe::{EncodedImageFormat, Font, IRect, Image, Rect, SamplingOptions};
 use std::io::Read;
 use std::ops::Add;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc::Receiver;
+use url::Url;
 
 #[derive(Clone, Default, Getters, MutGetters, Setters)]
 #[getset(set = "pub(crate)")]
@@ -60,10 +64,10 @@ impl FixedRect {
     }
 
     pub(crate) fn get_attr(&mut self, e: &Element, c: &mut LayoutCoord) {
-        if let Some(a) = e.attribute().position() {
+        if let Some(a) = e.position() {
             self.pos = &c.upper_rect().pos + a;
         } else {
-            let a = e.attribute().ordinal().unwrap_or(&Ordinal::None);
+            let a = e.ordinal().unwrap_or(&Ordinal::None);
             if let Some(pos) = c.next(&a) {
                 self.pos = pos;
             } else {
@@ -154,11 +158,17 @@ pub(crate) struct LayoutCoord {
 
 impl LayoutCoord {
     pub(crate) fn get_attr(&mut self, e: &Element, rect: FixedRect) {
-        if let Some(a) = e.attribute().column() {
+        if let Some(a) = e.column() {
             self.x = a.coord(rect.side().width(), rect.x());
         }
-        if let Some(a) = e.attribute().row() {
+        if self.x.len() == 0 {
+            self.x.push(0.0);
+        }
+        if let Some(a) = e.row() {
             self.y = a.coord(rect.side().height(), rect.y());
+        }
+        if self.y.len() == 0 {
+            self.y.push(0.0);
         }
         self.upper_rect = rect;
     }
@@ -177,38 +187,27 @@ impl LayoutCoord {
     }
 
     fn next_xy(&mut self, x_n: usize, y_n: usize) -> Option<Coord> {
-        self.x.get(x_n).and_then(|x| {
-            self.y.get(y_n).map(|y| {
-                if x_n + 1 == self.x.len() {
-                    self.y_n = y_n + 1;
-                    self.x_n = 0;
-                } else {
-                    self.y_n = y_n;
-                    self.x_n = x_n + 1;
-                }
-                Coord::new(*x, *y, self.upper_rect.z())
-            })
+        let x = self.x.get(x_n)?;
+        self.y.get(y_n).map(|y| {
+            if x_n + 1 == self.x.len() {
+                self.y_n = y_n + 1;
+                self.x_n = 0;
+            } else {
+                self.y_n = y_n;
+                self.x_n = x_n + 1;
+            }
+            Coord::new(*x, *y, self.upper_rect.z())
         })
     }
 }
 
-#[derive(Getters, MutGetters)]
+#[derive(Debug, Getters, MutGetters)]
 pub(crate) struct ApplyFont {
     name: String,
     #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
     color: Option<Color>,
     #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
     font: Arc<Font>,
-}
-
-impl std::fmt::Debug for ApplyFont {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ApplyFont")
-            .field("name", &self.name)
-            .field("color", &self.color)
-            .field("font", &self.font.typeface().family_name())
-            .finish()
-    }
 }
 
 impl Default for ApplyFont {
@@ -236,8 +235,8 @@ impl ApplyFont {
         })
     }
 
-    pub(crate) fn text_size(&self, text: &str, t: &mut DrawCtx) -> Rect {
-        let text_size = self.font.measure_str(text, Some(&t.paint));
+    pub(crate) fn text_size(&self, text: &str, paint: &Paint) -> Rect {
+        let text_size = self.font.measure_str(text, Some(paint));
         text_size.1
     }
 }
@@ -315,7 +314,7 @@ impl AlignPattern {
     }
 }
 
-#[derive(CopyGetters, Getters, MutGetters, Setters)]
+#[derive(CopyGetters, Debug, Getters, MutGetters, Setters)]
 pub(crate) struct DrawText {
     #[getset(get_copy = "pub(crate)", set = "pub(crate)")]
     cursor: bool,
@@ -325,16 +324,6 @@ pub(crate) struct DrawText {
     apply_font: ApplyFont,
     time_meter: Chronograph,
     interval: f32,
-}
-
-impl std::fmt::Debug for DrawText {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("DrawText");
-        f.field("cursor", &self.cursor)
-            .field("align_pattern", &self.align_pattern)
-            .field("apply_font", &self.apply_font)
-            .finish()
-    }
 }
 
 impl Default for DrawText {
@@ -350,8 +339,8 @@ impl Default for DrawText {
 }
 
 impl DrawText {
-    pub(crate) fn draw(&mut self, rect: &FixedRect, text: &str, t: &mut DrawCtx) {
-        let paint = &mut t.paint;
+    pub(crate) fn draw(&mut self, rect: &FixedRect, text: &str, dcx: &mut DrawCtx) {
+        let paint = &mut dcx.paint;
         if let Some(color) = self.apply_font.color() {
             paint.set_color(*color);
         } else {
@@ -359,17 +348,19 @@ impl DrawText {
         }
 
         let font = self.apply_font.font();
-        let size = self.apply_font.text_size(text, t);
+        let size = self.apply_font.text_size(text, &dcx.paint);
         let text_w = size.width();
         let text_h = size.height();
         let (c, a) = self.align_pattern.font_xy(rect, text_h);
         if text_w <= rect.side.width() {
-            let paint = &t.paint;
-            t.surface.canvas().draw_str_align(text, &c, font, paint, a);
+            let paint = &dcx.paint;
+            dcx.surface
+                .canvas()
+                .draw_str_align(text, &c, font, paint, a);
         } else {
             let rect2 = rect.side.clone().into();
             let (c, a) = self.align_pattern.font_xy(&rect2, text_h);
-            t.draw_in_rect(rect, |surface2, paint| {
+            dcx.draw_in_rect(rect, |surface2, paint| {
                 surface2.canvas().draw_str_align(text, &c, font, paint, a);
             });
         }
@@ -378,11 +369,11 @@ impl DrawText {
             if self.time_meter.elapsed() {
                 self.time_meter.refresh();
             } else {
-                let paint = &mut t.paint;
+                let paint = &mut dcx.paint;
                 let point0 = &c + (text_w + 2.0, (self.interval - text_h / 2.0) / 2.0);
                 let point1 = &point0 + (0.0, -self.interval);
                 paint.set_color(*default_cursor_color());
-                t.surface.canvas().draw_line(point0, point1, paint);
+                dcx.surface.canvas().draw_line(point0, point1, paint);
             }
         }
     }
@@ -423,6 +414,7 @@ pub(crate) struct ScrollBar {
     ver_f_length: f32,
     #[getset(get_copy = "pub(crate)")]
     vision_var: (f32, f32),
+    mp: Option<Coord2D>,
 }
 
 impl Default for ScrollBar {
@@ -440,6 +432,7 @@ impl Default for ScrollBar {
             ver_f_offset: 0.0,
             ver_f_length: 0.0,
             vision_var: Default::default(),
+            mp: None,
         }
     }
 }
@@ -533,41 +526,41 @@ impl ScrollBar {
         r + self.vision_var
     }
 
-    fn ver_draw(&mut self, t: &mut DrawCtx) {
+    fn ver_draw(&mut self, dcx: &mut DrawCtx) {
         let rect = &self.ver_rect;
         if self.ver_show && !rect.is_empty() {
-            self.painter.draw(rect, t);
+            self.painter.draw(rect, dcx);
             let r = FixedRect::new(
                 &**rect + (0.0, self.ver_f_offset),
                 RectSide::new(rect.side().width(), self.ver_f_length),
             );
-            self.scroll_bar.draw(&r, t);
+            self.scroll_bar.draw(&r, dcx);
         }
     }
 
-    fn hor_draw(&mut self, t: &mut DrawCtx) {
+    fn hor_draw(&mut self, dcx: &mut DrawCtx) {
         let rect = &self.hor_rect;
         if self.hor_show && !rect.is_empty() {
-            self.painter.draw(rect, t);
+            self.painter.draw(rect, dcx);
             let r = FixedRect::new(
                 &**rect + (self.hor_f_offset, 0.0),
                 RectSide::new(self.hor_f_length, rect.side().height()),
             );
-            self.scroll_bar.draw(&r, t);
+            self.scroll_bar.draw(&r, dcx);
         }
     }
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx) {
         match self.scroll_bar_type {
             ScrollBarType::Both => {
-                self.ver_draw(t);
-                self.hor_draw(t);
+                self.ver_draw(dcx);
+                self.hor_draw(dcx);
             }
             ScrollBarType::Horizontal => {
-                self.hor_draw(t);
+                self.hor_draw(dcx);
             }
             ScrollBarType::Vertical => {
-                self.ver_draw(t);
+                self.ver_draw(dcx);
             }
         }
     }
@@ -600,50 +593,92 @@ impl ScrollBar {
         }
     }
 
-    pub(crate) fn move_a_to_b(&mut self, a: &Coord2D, b: &Coord2D) {
-        let d = RectSide::away_from(b, a);
-        let dw = d.width();
-        let dh = d.height();
+    pub(crate) fn move_to(&mut self, o: &Coord2D, dw: f32, dh: f32) {
         match self.scroll_bar_type {
-            ScrollBarType::Both => self.hor_move(b, dw) || self.ver_move(b, dh),
-            ScrollBarType::Horizontal => self.hor_move(b, dw),
-            ScrollBarType::Vertical => self.ver_move(b, dh),
+            ScrollBarType::Both => self.hor_move(o, dw) || self.ver_move(o, dh),
+            ScrollBarType::Horizontal => self.hor_move(o, dw),
+            ScrollBarType::Vertical => self.ver_move(o, dh),
         };
+    }
+
+    pub(super) fn set_mp(&mut self, o: Coord2D) {
+        self.mp.replace(o);
+    }
+
+    pub(super) fn get_mp(&self) -> Option<Coord2D> {
+        self.mp.as_ref().cloned()
+    }
+
+    pub(super) fn clear_mp(&mut self) {
+        self.mp.take();
     }
 }
 
-pub(super) fn get_image(
-    rect: &RectSide,
-    t: &mut DrawCtx,
-    f: EncodedImageFormat,
-    data: &mut impl Read,
-) -> Option<Image> {
-    if let Some(decoder) = get_decoder(f) {
-        if let Ok(mut c) = decoder.from_stream(data) {
-            if let Ok(i) = c.get_image(None, None) {
-                let info = t.surface.canvas().image_info();
-                let info = info.with_dimensions(rect);
-                return i.make_scaled(&info, SamplingOptions::default());
-            }
-        }
+pub(super) fn get_image(rect: &RectSide, s: &str) -> Option<Image> {
+    if let Ok(url) = Url::parse(s) {
+        None
+    } else {
+        let f = ImageReader::open(s)
+            .inspect_err(|e| error!("ImageReader::open {e:?}"))
+            .ok()?
+            .with_guessed_format()
+            .inspect_err(|e| error!("with_guessed_format {e:?}"))
+            .ok()?
+            .format()?;
+        let f = get_sk_format(f)?;
+        let d = get_decoder(f)?;
+        let mut r = std::fs::File::open(s).ok()?;
+        resize_image(rect, get_sk_image(d, &mut r)?)
     }
-    None
+}
+
+fn get_sk_format(f: ImageFormat) -> Option<EncodedImageFormat> {
+    match f {
+        ImageFormat::Avif => Some(EncodedImageFormat::AVIF),
+        ImageFormat::Bmp => Some(EncodedImageFormat::BMP),
+        ImageFormat::Gif => Some(EncodedImageFormat::GIF),
+        ImageFormat::Ico => Some(EncodedImageFormat::ICO),
+        ImageFormat::Jpeg => Some(EncodedImageFormat::JPEG),
+        ImageFormat::Png => Some(EncodedImageFormat::PNG),
+        ImageFormat::WebP => Some(EncodedImageFormat::WEBP),
+        _ => None,
+    }
 }
 
 fn get_decoder(f: EncodedImageFormat) -> Option<Decoder> {
     match f {
+        EncodedImageFormat::BMP => Some(bmp_decoder::decoder()),
         EncodedImageFormat::GIF => Some(gif_decoder::decoder()),
+        EncodedImageFormat::ICO => Some(ico_decoder::decoder()),
         EncodedImageFormat::JPEG => Some(jpeg_decoder::decoder()),
         EncodedImageFormat::PNG => Some(png_decoder::decoder()),
+        EncodedImageFormat::WBMP => Some(wbmp_decoder::decoder()),
         EncodedImageFormat::WEBP => Some(webp_decoder::decoder()),
         _ => None,
     }
+}
+
+fn get_sk_image(decoder: Decoder, data: &mut impl Read) -> Option<Image> {
+    decoder
+        .from_stream(data)
+        .inspect_err(|e| error!("decoder from_stream {e:?}"))
+        .ok()?
+        .get_image(None, None)
+        .inspect_err(|e| error!("get_image {e:?}"))
+        .ok()
+}
+
+fn resize_image(rect: &RectSide, i: Image) -> Option<Image> {
+    let o = i.image_info().with_dimensions(rect);
+    i.make_scaled(&o, SamplingOptions::default())
 }
 
 #[derive(Debug)]
 pub(super) struct MediaReader {
     result: Option<ImageDataOutput>,
     receiver: Receiver<ImageDataOutput>,
+    duration: u64,
+    instant: Option<Instant>,
 }
 
 impl MediaReader {
@@ -652,6 +687,8 @@ impl MediaReader {
         Self {
             result: None,
             receiver,
+            duration: 0,
+            instant: None,
         }
     }
 
@@ -659,36 +696,59 @@ impl MediaReader {
         if let Some(r) = &mut self.result {
             r.pause(o);
         }
+        if o {
+            self.instant.take();
+        } else {
+            self.instant.replace(Instant::now());
+        }
     }
 
     pub(super) fn seek(&mut self, n: (u32, u32)) {
         if let Some(r) = &mut self.result {
             r.seek(n);
         }
+        if self.instant.is_some() {
+            self.instant.replace(Instant::now());
+        }
     }
 
-    pub(super) fn draw(&mut self, rect: &FixedRect, t: &mut DrawCtx) {
+    pub(super) fn rate_var(&mut self, n: f32) -> Option<f32> {
+        if self.duration == 0 {
+            return None;
+        }
+        let a = self.instant?.elapsed().as_micros() as u64;
+        self.instant.replace(Instant::now());
+        let n = (n * 1000.0) as u64;
+        let r = a * n / self.duration;
+        Some(r as f32 / 1000.0)
+    }
+
+    pub(super) fn draw(&mut self, rect: &FixedRect, dcx: &mut DrawCtx) {
         if let Some(r) = &mut self.result {
-            let info = t.surface.canvas().image_info();
+            let info = dcx.surface.canvas().image_info();
             if let Some(i) = r.data(info, rect.side()) {
-                t.surface.canvas().draw_image(i, &***rect, None);
+                dcx.surface.canvas().draw_image(i, &***rect, None);
             }
         } else if let Ok(a) = self.receiver.try_recv() {
+            self.duration = a.duration() as u64;
             self.result.replace(a);
+            self.instant.replace(Instant::now());
         }
     }
 
     pub(super) fn no_draw(&mut self) {
         if self.result.is_none() {
             if let Ok(a) = self.receiver.try_recv() {
+                self.duration = a.duration() as u64;
                 self.result.replace(a);
+                self.instant.replace(Instant::now());
             }
         }
     }
 }
 
-impl From<(&String, bool)> for MediaReader {
-    fn from(o: (&String, bool)) -> Self {
+impl From<(&str, bool)> for MediaReader {
+    fn from(o: (&str, bool)) -> Self {
         Self::new(o.0, o.1)
     }
 }
