@@ -1,12 +1,10 @@
 use super::*;
-use skia_safe::{EncodedImageFormat, Image, Path, Rect};
+use skia_safe::{Image, Path, Rect};
 
 ///"Audio" represents audio stream.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Audio {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     align_pattern: AlignPattern,
@@ -14,21 +12,8 @@ pub(crate) struct Audio {
     control: PlayPart,
 }
 
-impl std::fmt::Debug for Audio {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Audio");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .field("reader", &self.reader.is_some())
-            .finish()
-    }
-}
-
 impl Audio {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (1000.0, 100.0).into(),
@@ -43,8 +28,8 @@ impl Audio {
         }
     }
 
-    pub(crate) fn resize(&mut self, c: &mut LayoutCoord) {
-        if let Ok(e) = self.element.read() {
+    pub(crate) fn resize(&mut self, c: &mut LayoutCoord, cx: &mut PageContext) {
+        if let Some(e) = cx.get(self.element) {
             self.rect.get_attr(&e, c);
             self.control.resize(&self.rect);
         }
@@ -52,63 +37,82 @@ impl Audio {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
         if self.reader.is_none() {
-            if let Ok(e) = self.element.read() {
-                self.reader.replace((e.text(), false).into());
+            if let Some(s) = cx.text(self.element) {
+                self.reader.replace((s, false).into());
             }
         }
+
         if let Some(o) = &mut self.reader {
             o.no_draw();
+            self.control.move_rate(o);
         }
 
-        self.control.draw(t);
+        self.control.draw(dcx);
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            ActionKind::Click(c, _) => {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::Pressed(c, _) => {
                 if self.painter.within(&self.rect, c) {
-                    t.finish = true;
+                    acx.finish = true;
                     if self.control.within_pause(c) {
                         if let Some(o) = &mut self.reader {
                             o.pause(self.control.play);
                         }
                         self.control.play_pause();
+                    } else if self.control.within_rate(c) {
+                    } else if self.control.within_rate_bar(c) {
+                        self.control.set_rate(c);
+                        if let Some(o) = &mut self.reader {
+                            o.seek(self.control.rate());
+                        }
+                        self.control.sweep = false;
                     }
                     return;
                 }
             }
-            ActionKind::Sweep(a, b) => {
-                if self.painter.within(&self.rect, b) {
-                    t.finish = true;
-                    if self.control.within_time(b) || self.control.within_time(a) {
-                        self.control.set_rate(b.x() - a.x());
-                    }
+            ActionKind::DoubleClick(c, _)
+            | ActionKind::Cursor(c, _)
+            | ActionKind::CursorWithoutFocus(c, _) => {
+                if self.control.within_rate_bar(c) {
+                    acx.finish = true;
+                    return;
                 }
             }
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+            ActionKind::Released(_) => {
+                if self.control.sweep {
+                    if let Some(o) = &mut self.reader {
+                        o.seek(self.control.rate());
+                    }
+                    self.control.sweep = false;
+                }
+            }
+            ActionKind::Sweep(b, a, d) => {
+                if self.painter.within(&self.rect, b) {
+                    acx.finish = true;
+                    if self.control.within_rate(b) {
+                        self.control.set_rate(b);
+                        self.control.sweep = true;
+                        acx.push_callback();
+                    }
+                    return;
+                }
+            }
             _ => {}
         }
     }
 }
 
 ///"Img" represents an image.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Img {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     align_pattern: AlignPattern,
@@ -116,21 +120,8 @@ pub(crate) struct Img {
     buffer: Option<Image>,
 }
 
-impl std::fmt::Debug for Img {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Img");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .field("buffer", &self.buffer.is_some())
-            .finish()
-    }
-}
-
 impl Img {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -149,55 +140,46 @@ impl Img {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
         if self.buffer.is_none() {
-            if let Ok(_) = self.element.read() {
-                let o = Vec::new();
-                if let Some(i) = get_image(
-                    self.rect.side(),
-                    t,
-                    EncodedImageFormat::JPEG,
-                    &mut o.as_slice(),
-                ) {
-                    self.buffer.replace(i);
-                }
+            if let Some(i) = cx
+                .text(self.element)
+                .and_then(|s| get_image(self.rect.side(), s))
+            {
+                self.buffer.replace(i);
             }
         }
         if let Some(i) = &self.buffer {
-            t.surface.canvas().draw_image(i, &**self.rect, None);
+            dcx.surface.canvas().draw_image(i, &**self.rect, None);
         }
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            ActionKind::Click(c, _) => {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _)
+            | ActionKind::DoubleClick(c, _)
+            | ActionKind::Pressed(c, _)
+            | ActionKind::Cursor(c, _)
+            | ActionKind::CursorWithoutFocus(c, _)
+            | ActionKind::Sweep(c, _, _) => {
                 if self.painter.within(&self.rect, c) {
-                    t.finish = true;
+                    acx.finish = true;
                     return;
                 }
             }
             _ => {}
         }
     }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
-            _ => {}
-        }
-    }
 }
 
 ///"Video" represents video.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Video {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     align_pattern: AlignPattern,
@@ -205,21 +187,8 @@ pub(crate) struct Video {
     control: PlayPart,
 }
 
-impl std::fmt::Debug for Video {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Video");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .field("reader", &self.reader.is_some())
-            .finish()
-    }
-}
-
 impl Video {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -233,8 +202,8 @@ impl Video {
         }
     }
 
-    pub(crate) fn resize(&mut self, c: &mut LayoutCoord) {
-        if let Ok(e) = self.element.read() {
+    pub(crate) fn resize(&mut self, c: &mut LayoutCoord, cx: &mut PageContext) {
+        if let Some(e) = cx.get(self.element) {
             self.rect.get_attr(&e, c);
             self.control.resize(&self.rect);
         }
@@ -242,53 +211,73 @@ impl Video {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
         if self.reader.is_none() {
-            if let Ok(e) = self.element.read() {
-                self.reader.replace((e.text(), true).into());
+            if let Some(s) = cx.text(self.element) {
+                self.reader.replace((s, true).into());
             }
         }
 
         if let Some(o) = &mut self.reader {
-            o.draw(&self.rect, t);
+            o.draw(&self.rect, dcx);
+            self.control.move_rate(o);
         }
 
-        self.control.draw(t);
+        self.control.draw(dcx);
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            ActionKind::Click(c, _) => {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::Pressed(c, _) => {
                 if self.painter.within(&self.rect, c) {
-                    t.finish = true;
+                    acx.finish = true;
                     if self.control.within_pause(c) {
                         if let Some(o) = &mut self.reader {
                             o.pause(self.control.play);
                         }
                         self.control.play_pause();
+                    } else if self.control.within_rate(c) {
+                    } else if self.control.within_rate_bar(c) {
+                        self.control.set_rate(c);
+                        if let Some(o) = &mut self.reader {
+                            o.seek(self.control.rate());
+                        }
+                        self.control.sweep = false;
                     }
                     return;
                 }
             }
-            ActionKind::Sweep(a, b) => {
-                if self.painter.within(&self.rect, b) {
-                    t.finish = true;
-                    if self.control.within_time(b) || self.control.within_time(a) {
-                        self.control.set_rate(b.x() - a.x());
-                    }
+            ActionKind::DoubleClick(c, _)
+            | ActionKind::Cursor(c, _)
+            | ActionKind::CursorWithoutFocus(c, _) => {
+                if self.control.within_rate_bar(c) {
+                    acx.finish = true;
+                    return;
                 }
             }
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+            ActionKind::Released(_) => {
+                if self.control.sweep {
+                    if let Some(o) = &mut self.reader {
+                        o.seek(self.control.rate());
+                    }
+                    self.control.sweep = false;
+                }
+            }
+            ActionKind::Sweep(b, a, d) => {
+                if self.painter.within(&self.rect, b) {
+                    acx.finish = true;
+                    if self.control.within_rate(b) {
+                        self.control.set_rate(b);
+                        self.control.sweep = true;
+                        acx.push_callback();
+                    }
+                    return;
+                }
+            }
             _ => {}
         }
     }
@@ -300,11 +289,11 @@ struct PlayPart {
     center_x: f32,
     center_y: f32,
     radius: f32,
-    rate_0: FixedRect,
-    rate_1: FixedRect,
-    play: bool,
-    time: f32,
     position: Coord,
+    rate_bar: FixedRect,
+    play: bool,
+    rate: f32,
+    sweep: bool,
 }
 
 impl Default for PlayPart {
@@ -314,11 +303,11 @@ impl Default for PlayPart {
             center_x: 100.0,
             center_y: 50.0,
             radius: 20.0,
-            rate_0: Default::default(),
-            rate_1: Default::default(),
-            play: true,
-            time: 0.0,
             position: Default::default(),
+            rate_bar: Default::default(),
+            play: true,
+            rate: 0.0,
+            sweep: false,
         }
     }
 }
@@ -328,34 +317,25 @@ impl PlayPart {
         self.position.set_x(rect.x() + self.center_x);
         self.position.set_y(rect.bottom() - self.center_y);
 
-        self.rate_0.set_x(self.position.x() + (3.0 * self.radius));
-        self.rate_0.set_y(self.position.y() - (self.radius / 2.0));
-        let n = self.rate_0.x() - rect.x();
-        let o = self.rate_0.side_mut();
+        self.rate_bar.set_x(self.position.x() + (3.0 * self.radius));
+        self.rate_bar.set_y(self.position.y() - (self.radius / 2.0));
+        let n = self.rate_bar.x() - rect.x();
+        let o = self.rate_bar.side_mut();
         o.set_width((rect.side().width() - 2.0 * n).max(0.0));
         o.set_height(self.radius);
-
-        self.rate_1.set_x(self.rate_0.x() + self.time);
-        self.rate_1.set_y(self.rate_0.y());
-        let o = self.rate_1.side_mut();
-        o.set_width(10.0);
-        o.set_height(self.rate_0.side().height());
     }
 
-    fn set_rate(&mut self, n: f32) {
-        self.time = (self.time + n).min(self.rate_0.side().width()).max(0.0);
+    fn rate_width(&self) -> f32 {
+        self.rate_bar.side().height()
     }
 
-    fn rate(&self) -> (u32, u32) {
-        (
-            (self.time * 1000.0) as u32,
-            (self.rate_0.side().width() * 1000.0) as u32,
-        )
+    fn rate_x(&self) -> f32 {
+        self.rate_bar.x() + self.rate - self.rate_width() / 2.0
     }
 
-    fn draw(&mut self, t: &mut DrawCtx) {
-        let paint = &mut t.paint;
-        let canvas = t.surface.canvas();
+    fn draw(&mut self, dcx: &mut DrawCtx) {
+        let paint = &mut dcx.paint;
+        let canvas = dcx.surface.canvas();
         paint.set_color(self.color);
         let p = &*self.position;
         canvas.draw_circle(p, self.radius, paint);
@@ -381,13 +361,15 @@ impl PlayPart {
         }
 
         paint.set_color(self.color);
-        canvas.draw_rect(self.rate_0.to_rect(), paint);
+        canvas.draw_rect(self.rate_bar.to_rect(), paint);
         paint.set_color(Color::from_rgb(200, 0, 200));
-        let x = self.rate_0.x() + self.time - self.rate_1.side().width();
-        self.rate_1.set_x(x);
-        let mut r = self.rate_1.to_rect();
-        r.right += self.rate_1.side().width();
-        canvas.draw_rect(r, paint);
+        let rec = Rect::from_xywh(
+            self.rate_x(),
+            self.rate_bar.y(),
+            self.rate_width(),
+            self.rate_bar.side().height(),
+        );
+        canvas.draw_rect(rec, paint);
     }
 
     fn within_pause(&self, c: &Coord2D) -> bool {
@@ -397,11 +379,43 @@ impl PlayPart {
         c <= self.radius
     }
 
-    fn within_time(&self, c: &Coord2D) -> bool {
-        self.rate_1.within(c)
+    fn within_rate_bar(&self, c: &Coord2D) -> bool {
+        self.rate_bar.within(c)
+    }
+
+    fn within_rate(&self, c: &Coord2D) -> bool {
+        let x = self.rate_x();
+        between(c.x(), x, x + self.rate_width())
+            && between(c.y(), self.rate_bar.y(), self.rate_bar.bottom())
     }
 
     fn play_pause(&mut self) {
         self.play = !self.play;
+    }
+
+    fn set_rate(&mut self, p: &Coord2D) {
+        self.rate = (p.x() - self.rate_bar.x())
+            .min(self.rate_bar.side().width())
+            .max(0.0);
+    }
+
+    fn move_rate(&mut self, r: &mut MediaReader) {
+        let a = self.rate_bar.side().width();
+        if let Some(b) = r.rate_var(a) {
+            self.rate = (self.rate + b).min(a).max(0.0);
+            if self.rate == a && self.play {
+                self.play = false;
+                self.rate = 0.0;
+                r.pause(true);
+                r.seek(self.rate());
+            }
+        }
+    }
+
+    fn rate(&self) -> (u32, u32) {
+        (
+            (self.rate * 1000.0) as u32,
+            (self.rate_bar.side().width() * 1000.0) as u32,
+        )
     }
 }
