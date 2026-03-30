@@ -19,9 +19,12 @@ vulkano = { version = "*", optional = true, default-features = false, features =
 raw-window-handle = "0.6.2"
 log = "*"
 env_logger = "*"
+slotmap = "*"
 tokio = { version = "*", features = ["full"] }
 wgpu = { version = "*", default-features = false, features = ["std", "parking_lot", "wgsl"] }
 pollster = { version = "*", features = ["macro"] }
+image = "*"
+url = "*"
 
 
 [workspace.dependencies]
