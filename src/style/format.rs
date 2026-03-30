@@ -1,12 +1,13 @@
 use super::*;
 use crate::utils::ascii::*;
+use std::mem::take;
 
 pub(super) trait Output {
-    fn at(&mut self, s: String);
+    fn meta(&mut self, s: String);
 
-    fn mark_selector(&mut self, s: String);
+    fn mark_selector(&mut self, c: String, s: String);
 
-    fn attribute_selector(&mut self, k: String, v: String);
+    fn attribute_selector(&mut self, c: String, k: String, v: String);
 
     fn attribute(&mut self, k: String, v: String);
 
@@ -24,6 +25,7 @@ where
     c: char,
     counter: CharCounter,
     temporary: (String, String),
+    temporary_c: String,
     output: T,
 }
 
@@ -38,6 +40,7 @@ where
             c: NULL,
             counter: Default::default(),
             temporary: (String::new(), String::new()),
+            temporary_c: String::new(),
             output,
         }
     }
@@ -60,26 +63,30 @@ where
             self.temporary.1.clear();
         } else {
             let s = self.temporary.0.drain(..).as_str().to_lowercase();
-            self.output.at(s);
+            self.output.meta(s);
         }
     }
 
     fn output_m_selector(&mut self) {
         if self.temporary.0.is_empty() {
+            self.temporary_c.clear();
             self.temporary.1.clear();
         } else {
+            let c = take(&mut self.temporary_c);
             let s = self.temporary.0.drain(..).as_str().to_lowercase();
-            self.output.mark_selector(s);
+            self.output.mark_selector(c, s);
         }
     }
 
     fn output_a_selector(&mut self) {
         if self.temporary.1.is_empty() {
+            self.temporary_c.clear();
             self.temporary.0.clear();
         } else {
+            let c = take(&mut self.temporary_c);
             let n = self.temporary.0.drain(..).as_str().to_lowercase();
-            let v = self.temporary.1.drain(..).as_str().to_string();
-            self.output.attribute_selector(n, v);
+            let v = take(&mut self.temporary.1);
+            self.output.attribute_selector(c, n, v);
         }
     }
 
@@ -88,7 +95,7 @@ where
             self.temporary.1.clear();
         } else {
             let n = self.temporary.0.drain(..).as_str().to_lowercase();
-            let v = self.temporary.1.drain(..).as_str().to_string();
+            let v = take(&mut self.temporary.1);
             self.output.attribute(n, v);
         }
     }
@@ -116,8 +123,8 @@ where
     fn start(&mut self) {
         let c = self.c;
         match c {
-            AT => {
-                self.current_function = Self::at_0;
+            EXCLAMATION => {
+                self.current_function = Self::meta_0;
             }
             'A'..='Z' | 'a'..='z' => {
                 self.current_function = Self::m_selector;
@@ -134,22 +141,88 @@ where
         }
     }
 
-    fn at_0(&mut self) {
+    fn next_0(&mut self) {
         let c = self.c;
         match c {
-            'A'..='Z' | 'a'..='z' | HYPHEN => {
-                self.current_function = Self::at_1;
-                self.at_1();
+            'A'..='Z' | 'a'..='z' => {
+                self.current_function = Self::m_selector;
+                self.m_selector();
+            }
+            FULL_STOP => {
+                self.current_function = Self::a_selector_0;
+            }
+            QUESTION | PLUS | HYPHEN => {
+                self.temporary_c.push(c);
+                self.current_function = Self::combiner;
+            }
+            LEFT_CURLY_BRACKET => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::attr_expr_0;
             }
             _ => {
                 self.output_error("illegal char");
-                self.current_function = Self::ignore;
-                self.next_function = Self::at_0_1;
+                self.current_function = Self::next_0_1;
             }
         }
     }
 
-    fn at_1(&mut self) {
+    fn next_0_1(&mut self) {
+        match self.c {
+            SPACE | LF | CR => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::next_0;
+            }
+            _ => {}
+        }
+    }
+
+    fn next_1(&mut self) {
+        let c = self.c;
+        match c {
+            'A'..='Z' | 'a'..='z' => {
+                self.current_function = Self::m_selector;
+                self.m_selector();
+            }
+            FULL_STOP => {
+                self.current_function = Self::a_selector_0;
+            }
+            LEFT_CURLY_BRACKET => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::attr_expr_0;
+            }
+            _ => {
+                self.output_error("illegal char");
+                self.current_function = Self::next_1_1;
+            }
+        }
+    }
+
+    fn next_1_1(&mut self) {
+        match self.c {
+            SPACE | LF | CR => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::next_1;
+            }
+            _ => {}
+        }
+    }
+
+    fn meta_0(&mut self) {
+        let c = self.c;
+        match c {
+            'A'..='Z' | 'a'..='z' | HYPHEN => {
+                self.current_function = Self::meta_1;
+                self.meta_1();
+            }
+            _ => {
+                self.output_error("illegal char");
+                self.current_function = Self::ignore;
+                self.next_function = Self::meta_0_1;
+            }
+        }
+    }
+
+    fn meta_1(&mut self) {
         let c = self.c;
         match c {
             'A'..='Z' | 'a'..='z' | HYPHEN => {
@@ -158,16 +231,16 @@ where
             SPACE => {
                 self.output_at();
                 self.current_function = Self::ignore;
-                self.next_function = Self::at_2;
+                self.next_function = Self::meta_2;
             }
             _ => {
-                self.current_function = Self::at_2;
-                self.at_2();
+                self.current_function = Self::meta_2;
+                self.meta_2();
             }
         }
     }
 
-    fn at_2(&mut self) {
+    fn meta_2(&mut self) {
         match self.c {
             LEFT_CURLY_BRACKET => {
                 self.output_at();
@@ -182,12 +255,12 @@ where
             _ => {
                 self.output_error("illegal char");
                 self.current_function = Self::ignore;
-                self.next_function = Self::at_0_1;
+                self.next_function = Self::meta_0_1;
             }
         }
     }
 
-    fn at_0_1(&mut self) {
+    fn meta_0_1(&mut self) {
         match self.c {
             RIGHT_CURLY_BRACKET => {
                 self.current_function = Self::ignore;
@@ -206,7 +279,7 @@ where
             SPACE => {
                 self.output_m_selector();
                 self.current_function = Self::ignore;
-                self.next_function = Self::start;
+                self.next_function = Self::next_0;
             }
             LEFT_CURLY_BRACKET => {
                 self.output_m_selector();
@@ -276,7 +349,7 @@ where
             _ => {
                 self.output_a_selector();
                 self.current_function = Self::ignore;
-                self.next_function = Self::start;
+                self.next_function = Self::next_0;
                 self.ignore();
             }
         }
@@ -313,7 +386,31 @@ where
             }
             _ => {
                 self.current_function = Self::ignore;
-                self.next_function = Self::start;
+                self.next_function = Self::next_0;
+            }
+        }
+    }
+
+    fn combiner(&mut self) {
+        let c = self.c;
+        match c {
+            '0'..='9' => {
+                self.temporary_c.push(c);
+            }
+            SPACE => {
+                self.current_function = Self::ignore;
+                self.next_function = Self::next_1;
+            }
+            LEFT_CURLY_BRACKET => {
+                self.temporary_c.clear();
+                self.current_function = Self::ignore;
+                self.next_function = Self::attr_expr_0;
+            }
+            _ => {
+                self.temporary_c.clear();
+                self.output_error("illegal char");
+                self.current_function = Self::ignore;
+                self.next_function = Self::next_1;
             }
         }
     }
@@ -334,8 +431,8 @@ where
                 self.next_function = Self::attr_expr_1;
             }
             RIGHT_CURLY_BRACKET => {
-                self.current_function = Self::ignore;
-                self.next_function = Self::start;
+                self.current_function = Self::attr_expr_2;
+                self.attr_expr_2();
             }
             _ => {
                 self.output_error("illegal char");
@@ -366,6 +463,7 @@ where
                 self.next_function = Self::attr_expr_1;
             }
             RIGHT_CURLY_BRACKET => {
+                self.output_end();
                 self.current_function = Self::ignore;
                 self.next_function = Self::start;
             }
