@@ -4,84 +4,131 @@ mod x;
 use self::x::*;
 use super::*;
 use crate::utils::ascii::*;
-use std::collections::{HashMap, VecDeque};
+use slotmap::{DefaultKey, SecondaryMap, SlotMap};
+use std::collections::HashMap;
 
-#[derive(Debug)]
-pub(super) struct UnclearElement {
-    pub(super) key: String,
-    pub(super) text: String,
-    pub(super) attribute: HashMap<String, Option<String>>,
-    pub(super) subset: VecDeque<Self>,
+#[derive(Default)]
+struct TempResult {
+    data: SlotMap<DefaultKey, (String, String, HashMap<String, String>)>,
+    root: Vec<DefaultKey>,
+    subset: SecondaryMap<DefaultKey, Vec<DefaultKey>>,
 }
 
-impl Default for UnclearElement {
-    fn default() -> Self {
-        Self::new(String::new())
+impl std::fmt::Display for TempResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "TempResult {{ data: [")?;
+        for o in &self.data {
+            writeln!(f, "{:?}", o)?;
+        }
+        writeln!(f, "], subset: [")?;
+        for o in &self.subset {
+            writeln!(f, "{:?}", o)?;
+        }
+        write!(f, "] }}")
     }
 }
 
-impl UnclearElement {
-    fn new(key: String) -> Self {
-        Self {
-            key,
-            text: String::new(),
-            attribute: HashMap::new(),
-            subset: VecDeque::new(),
-        }
+impl TempResult {
+    fn has_root(&self) -> bool {
+        self.root.len() > 0
     }
 
-    fn push_text(&mut self, step: usize, s: &str) {
-        if s.is_empty() {
-            return;
-        }
-        if step == 0 {
-            self.text.push_str(s);
-        } else if let Some(o) = self.subset.back_mut() {
-            o.push_text(step - 1, s);
-        }
+    fn add_root(&mut self, e: (String, String, HashMap<String, String>)) -> DefaultKey {
+        let key = self.data.insert(e);
+        self.root.push(key);
+        key
     }
 
-    fn add_attribute(&mut self, k: String, s: Option<String>) -> bool {
-        if self.attribute.contains_key(&k) {
-            false
+    fn add(
+        &mut self,
+        upper_key: DefaultKey,
+        e: (String, String, HashMap<String, String>),
+    ) -> DefaultKey {
+        let key = self.data.insert(e);
+        if let Some(upper) = self.subset.get_mut(upper_key) {
+            upper.push(key);
         } else {
-            self.attribute.insert(k, s);
-            true
+            self.subset.insert(upper_key, vec![key]);
+        }
+        key
+    }
+
+    fn get_key(&mut self, step: usize) -> Option<DefaultKey> {
+        let mut k = self.root.last()?;
+        if step == 0 {
+            return Some(*k);
+        }
+        let mut n = step;
+        while let Some(o) = self.subset.get(*k) {
+            n -= 1;
+            if n == 0 {
+                return o.last().copied();
+            } else if let Some(o) = o.last() {
+                k = o;
+            } else {
+                break;
+            }
+        }
+        None
+    }
+
+    fn to_element(mut self, eh: &mut ElementHolder, error: &mut ErrorHolder) {
+        let root = self.root.clone();
+        for k in root {
+            if let Some(o) = self.data.remove(k) {
+                match Mark::try_from(&o.0) {
+                    Ok(m) => {
+                        let e = Element::new(m, o.1, AttributeHolder::from(o.2, error));
+                        let rk = eh.add_root(e);
+                        if let Some(j) = self.subset.remove(k) {
+                            self.to_element0(j, eh, rk, error);
+                        }
+                    }
+                    Err(e) => {
+                        trace!("{e}");
+                        error.push(e);
+                    }
+                }
+            }
         }
     }
 
-    fn add_subset(&mut self, step: usize, n: Self) -> Option<*mut Self> {
-        if step == 0 {
-            self.subset.push_back(n);
-            self.subset.back_mut().map(|p| p as *mut Self)
-        } else if let Some(o) = self.subset.back_mut() {
-            o.add_subset(step - 1, n)
-        } else {
-            None
+    fn to_element0(
+        &mut self,
+        v: Vec<DefaultKey>,
+        eh: &mut ElementHolder,
+        upper_key: ElementKey,
+        error: &mut ErrorHolder,
+    ) {
+        for k in v {
+            if let Some(o) = self.data.remove(k) {
+                match Mark::try_from(&o.0) {
+                    Ok(m) => {
+                        let e = Element::new(m, o.1, AttributeHolder::from(o.2, error));
+                        if let Some(ek) = eh.add(upper_key, e) {
+                            if let Some(j) = self.subset.remove(k) {
+                                self.to_element0(j, eh, ek, error);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        trace!("{e}");
+                        error.push(e);
+                    }
+                }
+            }
         }
     }
 }
 
+#[derive(Default)]
 struct Builder {
     temporary: Vec<String>,
-    rst: UnclearElement,
-    last_one: Option<*mut UnclearElement>,
+    rst: TempResult,
+    last_one: Option<DefaultKey>,
     last_step: usize,
     error: ErrorHolder,
     f: bool,
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Self {
-            temporary: Vec::new(),
-            rst: Default::default(),
-            last_one: None,
-            last_step: 0,
-            error: Default::default(),
-            f: false,
-        }
-    }
 }
 
 impl Builder {
@@ -105,11 +152,14 @@ impl Builder {
         None
     }
 
-    fn build(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
-        let mut parser = Builder::default();
-        let mut context = Context::new(&mut parser);
-        x::accept(&mut context, &buf);
-        (parser.rst.subset, parser.error)
+    fn to_element(mut self) -> (Option<ElementHolder>, ErrorHolder) {
+        if self.rst.has_root() {
+            let mut eh = ElementHolder::default();
+            self.rst.to_element(&mut eh, &mut self.error);
+            (Some(eh), self.error)
+        } else {
+            (None, self.error)
+        }
     }
 }
 
@@ -119,18 +169,20 @@ impl XParser for Builder {
             return;
         }
         self.temporary.push(s.clone());
-        let o = UnclearElement::new(s);
         let step = self.step();
-        if step == self.last_step + 1 {
+        let e = (s, String::new(), Default::default());
+        if step == 0 {
+            self.last_one.replace(self.rst.add_root(e));
+            self.last_step = step;
+            return;
+        } else if step == self.last_step + 1 {
             if let Some(p) = self.last_one {
-                unsafe {
-                    self.last_one = (*p).add_subset(0, o);
-                    self.last_step = step;
-                    return;
-                }
+                self.last_one.replace(self.rst.add(p, e));
+                self.last_step = step;
+                return;
             }
         }
-        self.last_one = self.rst.add_subset(step, o);
+        self.last_one = self.rst.get_key(step - 1).map(|k| self.rst.add(k, e));
         self.last_step = step;
     }
 
@@ -149,19 +201,26 @@ impl XParser for Builder {
         let step = self.step();
         if step == self.last_step {
             if let Some(p) = self.last_one {
-                unsafe {
-                    (*p).push_text(0, &s);
+                if let Some(o) = self.rst.data.get_mut(p) {
+                    o.1.push_str(&s);
                     return;
                 }
             }
         }
-        self.rst.push_text(step + 1, &s);
+        if let Some(k) = self.rst.get_key(step) {
+            if let Some(o) = self.rst.data.get_mut(k) {
+                o.1.push_str(&s);
+            }
+        }
     }
 
-    fn attribute(&mut self, k: String, s: Option<String>) {
+    fn attribute(&mut self, k: String, s: String) {
         if let Some(p) = self.last_one {
-            unsafe {
-                (*p).add_attribute(k, s);
+            if let Some(o) = self.rst.data.get_mut(p) {
+                if o.2.contains_key(&k) {
+                } else {
+                    o.2.insert(k, s);
+                }
             }
         }
     }
@@ -200,10 +259,12 @@ impl s::Output for Builder {
     }
 
     fn attribute(&mut self, k: String, v: String) {
-        let v = if v.is_empty() { None } else { Some(v) };
         if let Some(p) = self.last_one {
-            unsafe {
-                (*p).add_attribute(k, v);
+            if let Some(o) = self.rst.data.get_mut(p) {
+                if o.2.contains_key(&k) {
+                } else {
+                    o.2.insert(k, v);
+                }
             }
         }
     }
@@ -217,13 +278,14 @@ impl s::Output for Builder {
     }
 }
 
-pub(super) fn accept(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
-    Builder::build(buf)
+pub(super) fn accept(s: &str) -> (Option<ElementHolder>, ErrorHolder) {
+    let mut o = Builder::default();
+    Context::new(&mut o).parse_str(s);
+    o.to_element()
 }
 
-pub(super) fn accept_s(buf: &str) -> (VecDeque<UnclearElement>, ErrorHolder) {
-    let o = s::Parser::new(Builder::default()).parse_str(buf);
-    (o.rst.subset, o.error)
+pub(super) fn accept_s(s: &str) -> (Option<ElementHolder>, ErrorHolder) {
+    s::Parser::new(Builder::default()).parse_str(s).to_element()
 }
 
 #[cfg(test)]
@@ -237,9 +299,9 @@ mod tests {
 
     #[test]
     fn build() {
-        println!("{:?}", Builder::build(A));
-        println!("{:?}", Builder::build(B));
-        println!("{:?}", Builder::build(C));
+        println!("{:?}", accept(A));
+        println!("{:?}", accept(B));
+        println!("{:?}", accept(C));
         println!("{:?}", accept_s(D));
     }
 }
