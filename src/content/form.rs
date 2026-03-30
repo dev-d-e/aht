@@ -1,12 +1,9 @@
 use super::*;
-use std::sync::{Arc, RwLock};
 
 ///"Button" represents a button.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Button {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     draw_text: DrawText,
@@ -14,20 +11,8 @@ pub(crate) struct Button {
     f: bool,
 }
 
-impl std::fmt::Debug for Button {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Button");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Button {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 60.0).into(),
@@ -46,8 +31,8 @@ impl Button {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
         if self.f && self.time_meter.elapsed() {
             self.painter = RoundRectangle {
@@ -55,18 +40,19 @@ impl Button {
                 ..Default::default()
             }
             .into();
+            self.f = false;
         }
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
-        if let Ok(e) = self.element.read() {
-            self.draw_text.draw(&self.rect, e.text(), t);
+        if let Some(s) = cx.text(self.element) {
+            self.draw_text.draw(&self.rect, s, dcx);
         }
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            ActionKind::Click(c, _) => {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::Pressed(c, _) => {
                 if self.painter.within(&self.rect, c) {
                     self.f = true;
                     self.painter = RoundRectangle {
@@ -75,47 +61,40 @@ impl Button {
                     }
                     .into();
                     self.time_meter.refresh();
-                    t.finish = true;
+                    acx.finish = true;
                     return;
                 }
             }
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+            ActionKind::Released(_) => {
+                if self.f {
+                    self.painter = RoundRectangle {
+                        color: *default_button_color(),
+                        ..Default::default()
+                    }
+                    .into();
+                    self.f = false;
+                }
+            }
             _ => {}
         }
     }
 }
 
 ///"Inp" represents input.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Inp {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     draw_text: DrawText,
-}
-
-impl std::fmt::Debug for Inp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Inp");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
+    ops: Vec<Opt>,
+    f: bool,
 }
 
 impl Inp {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
+        let v = eh.subset_with_mark(element, Mark::OPTION);
+        let ops = v.into_iter().map(|o| Opt::new(o)).collect();
         Self {
             element,
             rect: (100.0, 30.0).into(),
@@ -125,6 +104,8 @@ impl Inp {
             }
             .into(),
             draw_text: Default::default(),
+            ops,
+            f: false,
         }
     }
 
@@ -132,27 +113,51 @@ impl Inp {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
-        if let Ok(e) = self.element.read() {
-            self.draw_text.draw(&self.rect, e.get_value_or_text(), t);
+        if let Some(e) = cx.get(self.element) {
+            self.draw_text.draw(&self.rect, e.get_value_or_text(), dcx);
         }
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            ActionKind::Click(c, _) | ActionKind::DoubleClick(c, _) => {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::DoubleClick(c, _) | ActionKind::Pressed(c, _) => {
                 if self.painter.within(&self.rect, c) {
-                    t.context.set_input_to(self.element.clone());
+                    self.f = true;
                     self.draw_text.set_cursor(true);
-                    t.finish = true;
+                    acx.finish = true;
                     return;
                 } else {
-                    t.context.take_input_to();
+                    self.f = false;
                     self.draw_text.set_cursor(false);
+                }
+            }
+            ActionKind::InputStr(s) => {
+                if self.f {
+                    if s.len() > 0 {
+                        if let Some(a) = cx.get_mut(self.element).and_then(|e| e.value_or_insert())
+                        {
+                            a.push_str(&s);
+                        }
+                    }
+                    acx.finish = true;
+                    return;
+                }
+            }
+            ActionKind::DeleteFront(n) => {
+                if self.f {
+                    acx.finish = true;
+                    return;
+                }
+            }
+            ActionKind::DeleteBack(n) => {
+                if self.f {
+                    acx.finish = true;
+                    return;
                 }
             }
             ActionKind::Focused(o) => {
@@ -164,39 +169,18 @@ impl Inp {
             _ => {}
         }
     }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
-            _ => {}
-        }
-    }
 }
 
 ///"Opt" represents an option.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Opt {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
 }
 
-impl std::fmt::Debug for Opt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Opt");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Opt {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -204,37 +188,23 @@ impl Opt {
         }
     }
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        self.painter.draw(&self.rect, t);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx) {
+        self.painter.draw(&self.rect, dcx);
     }
 }
 
 ///"Pt" represents plain text.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Pt {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     draw_text: DrawText,
     scroll_bar: ScrollBar,
 }
 
-impl std::fmt::Debug for Pt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Pt");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Pt {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -252,54 +222,47 @@ impl Pt {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
-        if let Ok(e) = self.element.read() {
-            let s = e.text();
-            t.paint.set_color(*default_font_color());
+        if let Some(s) = cx.text(self.element) {
+            dcx.paint.set_color(*default_font_color());
             let dt = &self.draw_text;
-            let size = dt.apply_font().text_size(s, t);
+            let size = dt.apply_font().text_size(s, &dcx.paint);
             let h = self.rect.side().height().max(size.height());
             let max = (size.width(), h).into();
             let vision = self.scroll_bar.resize(&self.rect, &max);
             let (c, a) = dt.align_pattern().font_xy(&self.rect, size.height());
             let font = dt.apply_font().font();
-            t.draw_in_vision(&vision, &self.rect, |surface2, paint| {
+            dcx.draw_in_vision(&vision, &self.rect, |surface2, paint| {
                 surface2.canvas().draw_str_align(s, &c, font, paint, a);
             });
-            self.scroll_bar.draw(t);
+            self.scroll_bar.draw(dcx);
         }
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match &t.kind {
-            ActionKind::Sweep(a, b) => {
-                if self.scroll_bar.within(b) {
-                    self.scroll_bar.move_a_to_b(a, b);
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::DoubleClick(c, _) | ActionKind::Pressed(c, _) => {
+                if self.painter.within(&self.rect, c) {
+                    self.draw_text.set_cursor(true);
+                    acx.finish = true;
                     return;
+                } else {
+                    self.draw_text.set_cursor(false);
                 }
             }
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
             _ => {}
         }
     }
 }
 
 ///"Select" represents a select.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Select {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     draw_text: DrawText,
@@ -307,20 +270,10 @@ pub(crate) struct Select {
     ops: Vec<Opt>,
 }
 
-impl std::fmt::Debug for Select {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Select");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Select {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
+        let v = eh.subset_with_mark(element, Mark::OPTION);
+        let ops = v.into_iter().map(|o| Opt::new(o)).collect();
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -331,7 +284,7 @@ impl Select {
             .into(),
             draw_text: Default::default(),
             scroll_bar: Default::default(),
-            ops: Default::default(),
+            ops,
         }
     }
 
@@ -339,55 +292,43 @@ impl Select {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
-        if let Ok(e) = self.element.read() {
-            self.draw_text.draw(&self.rect, e.text(), t);
+        if let Some(s) = cx.text(self.element) {
+            self.draw_text.draw(&self.rect, s, dcx);
         }
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match t.kind {
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::DoubleClick(c, _) | ActionKind::Pressed(c, _) => {
+                if self.painter.within(&self.rect, c) {
+                    self.draw_text.set_cursor(true);
+                    acx.finish = true;
+                    return;
+                } else {
+                    self.draw_text.set_cursor(false);
+                }
+            }
             _ => {}
         }
     }
 }
 
 ///"Time" represents date time.
-#[derive(Getters, MutGetters)]
+#[derive(Debug)]
 pub(crate) struct Time {
-    #[getset(get = "pub(crate)")]
-    element: Arc<RwLock<Element>>,
-    #[getset(get = "pub(crate)", get_mut = "pub(crate)")]
+    element: ElementKey,
     rect: FixedRect,
     painter: AppearanceComposite,
     draw_text: DrawText,
 }
 
-impl std::fmt::Debug for Time {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Time");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.field("rect", &self.rect)
-            .field("painter", &self.painter)
-            .finish()
-    }
-}
-
 impl Time {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(element: ElementKey, eh: &ElementHolder) -> Self {
         Self {
             element,
             rect: (100.0, 100.0).into(),
@@ -404,25 +345,27 @@ impl Time {
 
     right_bottom!();
 
-    pub(crate) fn draw(&mut self, t: &mut DrawCtx) {
-        draw_check!(self);
+    pub(crate) fn draw(&mut self, dcx: &mut DrawCtx, cx: &mut PageContext) {
+        draw_check!(self, cx);
 
-        self.painter.draw(&self.rect, t);
+        self.painter.draw(&self.rect, dcx);
 
-        if let Ok(e) = self.element.read() {
-            self.draw_text.draw(&self.rect, e.text(), t);
+        if let Some(s) = cx.text(self.element) {
+            self.draw_text.draw(&self.rect, s, dcx);
         }
     }
 
-    pub(crate) fn consume_action(&mut self, t: &mut ActionCtx) {
-        match t.kind {
-            _ => {}
-        }
-    }
-
-    fn callback_action(&mut self) -> impl FnMut(&ActionKind, &mut PageContext) {
-        let o = self as *mut Self;
-        move |a, context| match &a {
+    pub(crate) fn consume_action(&mut self, acx: &mut ActionCtx, cx: &mut PageContext) {
+        match &acx.kind {
+            ActionKind::Click(c, _) | ActionKind::DoubleClick(c, _) | ActionKind::Pressed(c, _) => {
+                if self.painter.within(&self.rect, c) {
+                    self.draw_text.set_cursor(true);
+                    acx.finish = true;
+                    return;
+                } else {
+                    self.draw_text.set_cursor(false);
+                }
+            }
             _ => {}
         }
     }
