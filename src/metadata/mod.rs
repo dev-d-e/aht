@@ -5,74 +5,57 @@ use crate::markup::*;
 use crate::page::*;
 use crate::script::*;
 use crate::style::*;
+use crate::utils::*;
 use std::sync::{Arc, RwLock};
 
 ///"Style" represents style.
+#[derive(Debug)]
 pub(crate) struct Style {
-    element: Arc<RwLock<Element>>,
-    style: StyleContext,
-}
-
-impl std::fmt::Debug for Style {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Style");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.finish()
-    }
+    style: Option<StyleContext>,
 }
 
 impl Style {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
-        Self {
-            element,
-            style: StyleContext::new(),
+    pub(crate) fn new(cx: &mut PageContext) -> Self {
+        let mut style = None;
+        if let Some(s) = cx.text(cx.style_key()) {
+            let mut o = StyleContext::new(s);
+            o.set_style(cx);
+            style.replace(o);
         }
-    }
-
-    pub(crate) fn build(&mut self, context: &mut PageContext) {
-        if let Ok(e) = self.element.read() {
-            if e.text().is_empty() {
-                return;
-            }
-            self.style.build(e.text(), context)
-        }
+        Self { style }
     }
 }
 
 ///"Script" represents script.
+#[derive(Debug)]
 pub(crate) struct Script {
-    element: Arc<RwLock<Element>>,
-    script_rt: ScriptRuntime,
-}
-
-impl std::fmt::Debug for Script {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut f = f.debug_struct("Script");
-        if let Ok(o) = self.element.try_read() {
-            f.field("element", &o.to_string());
-        }
-        f.finish()
-    }
+    rt: Option<ScriptRuntime>,
 }
 
 impl Script {
-    pub(crate) fn new(element: Arc<RwLock<Element>>) -> Self {
+    pub(crate) fn new(cx: &mut PageContext) -> Self {
         Self {
-            element,
-            script_rt: ScriptRuntime::new(),
+            rt: Default::default(),
         }
     }
 
-    pub(crate) fn run(&mut self, context: &mut PageContext) {
-        if let Ok(e) = self.element.read() {
-            if e.text().is_empty() {
-                return;
-            }
-            if let Some(t) = e.attribute().script_type() {
-                self.script_rt.run(e.text(), &t, context)
-            }
+    pub(crate) fn build(&mut self, cx: Arc<RwLock<PageContext>>) {
+        if self.rt.is_none() {
+            let (s, t) = {
+                let o = result_return!(cx.read());
+                let e = option_return!(o.script_element().filter(|e| !e.text().is_empty()));
+                let t = option_return!(e.script_type());
+                (e.text().to_string(), t.clone())
+            };
+            let mut rt = ScriptRuntime::new(t, cx);
+            rt.exec(s);
+            self.rt.replace(rt);
+        }
+    }
+
+    pub(crate) fn rebuild(&mut self) {
+        if let Some(rt) = &mut self.rt {
+            rt.rebuild();
         }
     }
 }
