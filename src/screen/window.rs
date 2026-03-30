@@ -1,5 +1,4 @@
 use super::*;
-use getset::{Getters, MutGetters, Setters};
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
@@ -11,19 +10,14 @@ use winit::window::{Window, WindowAttributes, WindowId};
 const WINDOW_FPS: (u32, u32) = (60, 1);
 
 ///A builder for an application.
+#[derive(Default)]
 pub struct ScreenBuilder {}
-
-impl Default for ScreenBuilder {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 impl ScreenBuilder {
     ///Run the application.
     pub fn run(&mut self, mut o: WindowContext) -> Result<()> {
-        let event_loop: Result<_> = EventLoop::new().map_err(|e| to_err(ErrorKind::Window, e));
-        event_loop?
+        let event_loop = EventLoop::new().map_err(|e| to_err(ErrorKind::Window, e))?;
+        event_loop
             .run_app(&mut o)
             .map_err(|e| to_err(ErrorKind::Window, e))
     }
@@ -88,9 +82,7 @@ impl ApplicationHandler for WindowContext {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let c: Coord2D = position.to_logical(self.page.scale_factor() as f64).into();
-                if let Some(a) = self.event_wrapper.analyse(c) {
-                    self.page.receive_action(a);
-                }
+                self.page.receive_action(self.event_wrapper.analyse(c));
             }
             WindowEvent::Focused(o) => {
                 self.page.receive_action(ActionKind::Focused(o));
@@ -101,19 +93,13 @@ impl ApplicationHandler for WindowContext {
                     ElementState::Pressed => match event.logical_key {
                         Key::Named(n) => match n {
                             NamedKey::Backspace => {
-                                if let Some(c) = &self.event_wrapper.cursor {
-                                    self.page
-                                        .receive_action(ActionKind::DeleteFront(c.clone(), 1));
-                                }
+                                self.page.receive_action(ActionKind::DeleteFront(1));
                             }
                             NamedKey::Clear => {}
                             NamedKey::Copy => {}
                             NamedKey::Cut => {}
                             NamedKey::Delete => {
-                                if let Some(c) = &self.event_wrapper.cursor {
-                                    self.page
-                                        .receive_action(ActionKind::DeleteBack(c.clone(), 1));
-                                }
+                                self.page.receive_action(ActionKind::DeleteBack(1));
                             }
                             NamedKey::Insert => {}
                             _ => {}
@@ -133,13 +119,14 @@ impl ApplicationHandler for WindowContext {
                 MouseButton::Left => {
                     match state {
                         ElementState::Pressed => {
-                            if let Some(c) = &self.event_wrapper.cursor {
-                                self.page.receive_action(ActionKind::Click(c.clone(), 0));
-                            }
                             self.event_wrapper.pressed.replace(0);
+                            if let Some(c) = self.event_wrapper.cursor() {
+                                self.page.receive_action(ActionKind::Pressed(c, 0));
+                            }
                         }
                         ElementState::Released => {
                             self.event_wrapper.pressed.take();
+                            self.page.receive_action(ActionKind::Released(0));
                         }
                     };
                 }
@@ -184,20 +171,11 @@ impl From<LogicalPosition<f32>> for Coord2D {
     }
 }
 
+#[derive(Default)]
 struct WindowEventWrapper {
     focused: bool,
     cursor: Option<Coord2D>,
     pressed: Option<u8>,
-}
-
-impl Default for WindowEventWrapper {
-    fn default() -> Self {
-        Self {
-            focused: false,
-            cursor: None,
-            pressed: None,
-        }
-    }
 }
 
 impl WindowEventWrapper {
@@ -206,14 +184,27 @@ impl WindowEventWrapper {
         self.pressed.take();
     }
 
-    fn analyse(&mut self, o: Coord2D) -> Option<ActionKind> {
-        let mut r = None;
-        if let Some(_) = self.pressed {
-            if let Some(a) = &self.cursor {
-                r.replace(ActionKind::Sweep(a.clone(), o.clone()));
+    fn cursor(&self) -> Option<Coord2D> {
+        self.cursor.as_ref().cloned()
+    }
+
+    fn analyse(&mut self, b: Coord2D) -> ActionKind {
+        let d = self
+            .cursor
+            .as_ref()
+            .map(|a| (b.x() - a.x(), b.y() - a.y()))
+            .unwrap_or((0.0, 0.0));
+        let mut r = if self.focused {
+            ActionKind::Cursor(b.clone(), d)
+        } else {
+            ActionKind::CursorWithoutFocus(b.clone(), d)
+        };
+        if let Some(a) = self.cursor() {
+            if self.pressed.is_some() {
+                r = ActionKind::Sweep(b.clone(), a, d);
             }
         }
-        self.cursor.replace(o);
+        self.cursor.replace(b);
         r
     }
 }
