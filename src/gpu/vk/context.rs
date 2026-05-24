@@ -1,3 +1,4 @@
+use super::*;
 use skia_safe::gpu::backend_render_targets::make_vk;
 use skia_safe::gpu::direct_contexts::make_vulkan;
 use skia_safe::gpu::surfaces::wrap_backend_render_target;
@@ -22,17 +23,27 @@ pub(super) fn build_direct_context(
         let get_proc = |gpo| {
             match gpo {
                 GetProcOf::Instance(i, name) => {
-                    let vk_instance = ash::vk::Instance::from_raw(i as _);
-                    library.get_instance_proc_addr(vk_instance, name)
+                    library.get_instance_proc_addr(ash::vk::Instance::from_raw(i as _), name)
                 }
                 GetProcOf::Device(d, name) => {
                     let get_device_proc_addr = instance.fns().v1_0.get_device_proc_addr;
-                    let vk_device = ash::vk::Device::from_raw(d as _);
-                    get_device_proc_addr(vk_device, name)
+                    let name = gpo
+                        .name()
+                        .to_str()
+                        .map(|s| match s {
+                            "vkCopyMemoryToImage" => c"vkCopyMemoryToImageEXT".as_ptr(),
+                            "vkTransitionImageLayout" => c"vkTransitionImageLayoutEXT".as_ptr(),
+                            _ => name,
+                        })
+                        .unwrap_or(name);
+                    get_device_proc_addr(ash::vk::Device::from_raw(d as _), name)
                 }
             }
             .map(|o| o as _)
-            .unwrap_or_else(|| std::ptr::null())
+            .unwrap_or_else(|| {
+                error!("get_proc: {:?}", gpo.name().to_str());
+                std::ptr::null()
+            })
         };
 
         let b = BackendContext::new(
