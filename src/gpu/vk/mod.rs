@@ -8,28 +8,25 @@ mod context;
 
 use self::context::*;
 use super::*;
-use getset::Getters;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use skia_safe::gpu::DirectContext;
 use std::any::Any;
 use std::cmp::max;
 use std::collections::BTreeMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
 };
-use vulkano::image::view::ImageView;
 use vulkano::image::ImageUsage;
+use vulkano::image::view::ImageView;
 use vulkano::instance::{Instance, InstanceCreateInfo, InstanceExtensions};
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
 use vulkano::swapchain::{
-    acquire_next_image, PresentMode, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo,
+    PresentMode, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo, acquire_next_image,
 };
-use vulkano::sync::{now, GpuFuture};
-use vulkano::{single_pass_renderpass, VulkanLibrary};
-
-static INSTANCE: LazyLock<InstanceHolder> = LazyLock::new(|| InstanceHolder::new().unwrap());
+use vulkano::sync::{GpuFuture, now};
+use vulkano::{VulkanLibrary, single_pass_renderpass};
 
 ///Represents an instance and physical devices.
 #[derive(Getters)]
@@ -71,6 +68,7 @@ impl InstanceHolder {
     pub fn physical_device(&self, surface: Arc<Surface>) -> Result<Arc<PhysicalDevice>> {
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
+            ext_host_image_copy: true,
             ..Default::default()
         };
         self.physical_devices
@@ -167,6 +165,7 @@ impl DeviceQueueHolder {
             queue_create_infos,
             enabled_extensions: DeviceExtensions {
                 khr_swapchain: true,
+                ext_host_image_copy: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -194,7 +193,7 @@ impl DeviceQueueHolder {
 
     ///Creates a device and accompanying queues from a random physical device.
     pub fn with_random_physical_device() -> Result<Self> {
-        let o = INSTANCE.random_physical_device()?;
+        let o = InstanceHolder::new()?.random_physical_device()?;
         Self::new(o)
     }
 }
@@ -214,7 +213,7 @@ impl SurfaceQueueHolder {
     pub fn new(
         w: Arc<impl HasWindowHandle + HasDisplayHandle + Any + Send + Sync>,
     ) -> Result<Self> {
-        let i = &INSTANCE;
+        let i = InstanceHolder::new()?;
         let surface =
             Surface::from_window(i.instance().clone(), w).map_err(|e| to_err(ErrorKind::Gpu, e))?;
         let p = i.physical_device(surface.clone())?;
@@ -375,10 +374,10 @@ impl VkRenderer {
                 return;
             }
         }
-        let (image_index, suboptimal, acquire_future) =
-            result_return!(
-                acquire_next_image(self.swapchain.clone(), None).map_err(|e| warn!("{e:?}"))
-            );
+        let (image_index, suboptimal, acquire_future) = result_return!(
+            acquire_next_image(self.swapchain.clone(), None)
+                .map_err(|e| warn!("acquire_next_image: {e}"))
+        );
 
         if suboptimal {
             self.reflesh = true;
