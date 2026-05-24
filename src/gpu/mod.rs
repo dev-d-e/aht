@@ -1,5 +1,5 @@
 pub mod shader;
-#[cfg(feature = "vulkan")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod vk;
 
 use crate::error::*;
