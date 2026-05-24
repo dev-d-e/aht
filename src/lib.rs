@@ -71,7 +71,6 @@ Page::parse("<aht>
 
 | Feature            | Description                                      |
 |--------------------|--------------------------------------------------|
-| `vulkan`           | Enables the Vulkan backend.                      |
 | `js`               | Enables javascript.                              |
 | `window`           | Enables winit window.                            |
 */
